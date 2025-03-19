@@ -1,0 +1,25 @@
+# Core dependencies
+chromadb==0.4.24          # Vector database for storing embeddings
+google-generativeai==0.3.2 # Gemini AI for embeddings
+python-dotenv==1.0.1      # Environment variable management
+
+# Document processing
+unstructured>=0.10.0      # Unified document processing (PDF, DOCX, TXT, etc.)
+
+# Web content processing
+requests==2.31.0          # HTTP requests library
+beautifulsoup4==4.12.2    # HTML parsing
+PyPDF2==3.0.1             # PDF processing for online PDFs
+lxml==4.9.3               # XML and HTML parser (used by BeautifulSoup)
+
+# Required by dependencies
+numpy==1.26.4            # Required by ChromaDB
+
+# Authentication and database
+pymongo==4.6.1           # MongoDB driver
+passlib==1.7.4           # Password hashing
+pyjwt==2.8.0             # JWT token handling
+python-multipart==0.0.6  # Form data parsing
+email-validator==2.1.0   # Email validation
+fastapi>=0.100.0         # API framework
+uvicorn>=0.22.0          # ASGI server
