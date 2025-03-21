@@ -74,9 +74,10 @@ def get_user_collection_name(username: str):
     """
     return f"user_{username}_docs"
 
-def retrieve_documents(username: str, folder_name: Optional[str] = None, document_name: Optional[str] = None):
+def retrieve_documents(username: str, folder_name: Optional[str] = None, document_name: Optional[str] = None, query: Optional[str] = None):
     """
     Fetches documents from ChromaDB based on user, folder, and document filters.
+    If query is provided, performs semantic search to find relevant documents.
     """
     try:
         # Get user's collection
@@ -90,7 +91,40 @@ def retrieve_documents(username: str, folder_name: Optional[str] = None, documen
         if document_name:
             where_filter["document_name"] = document_name
         
-        # Query documents with filter
+        # If query is provided, perform semantic search
+        if query:
+            # Import embedding function
+            from embedding_function import GeminiEmbeddingFunction
+            embedding_func = GeminiEmbeddingFunction(api_key=GOOGLE_GEMINI_API_KEY)
+            
+            # Convert query to embedding
+            query_embedding = embedding_func([query])[0]
+            
+            # Perform semantic search with metadata filtering
+            try:
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=5,  # Return top 5 most similar chunks
+                    where=where_filter if where_filter else None
+                )
+                
+                if not results or not results["documents"] or len(results["documents"][0]) == 0:
+                    print(f"⚠️ No semantic search results found for query: {query}")
+                    return None  # No documents found
+                
+                # Join the most relevant documents into a single string
+                documents_text = "\n\n".join(results["documents"][0])
+                print(f"🔍 Retrieved Documents via semantic search for {username}: {len(results['documents'][0])} chunks")
+                return documents_text
+                
+            except Exception as e:
+                print(f"❌ Error in semantic search: {str(e)}")
+                # Fall back to metadata-only retrieval if semantic search fails
+                print("⚠️ Falling back to metadata-only retrieval")
+                
+                # Continue with regular metadata filtering below
+        
+        # Query documents with filter (used when no query is provided or as fallback)
         if where_filter:
             docs = collection.get(where=where_filter, include=["documents", "metadatas"])
         else:
@@ -101,7 +135,7 @@ def retrieve_documents(username: str, folder_name: Optional[str] = None, documen
         
         # Join all documents into a single string
         documents_text = "\n\n".join(docs["documents"])
-        print(f"🔍 Retrieved Documents for {username}: {documents_text}")  # Debugging
+        print(f"🔍 Retrieved Documents for {username} via metadata filter: {len(docs['documents'])} chunks")
         return documents_text
     
     except Exception as e:
@@ -385,11 +419,12 @@ async def chat(
     document_name = request.document_name
     mode = request.mode
     
-    # Retrieve documents based on filters
+    # Retrieve documents based on filters AND query for semantic search
     customer_data = retrieve_documents(
         current_user.username,
         folder_name,
-        document_name
+        document_name,
+        query  # Pass the query for semantic search
     )
 
     if not customer_data:
