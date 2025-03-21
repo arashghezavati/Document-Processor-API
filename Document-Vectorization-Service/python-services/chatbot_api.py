@@ -441,7 +441,12 @@ async def chat(
     # Construct AI prompt ensuring NO introduction text
     prompt = (
         f"{customer_data}\n\n"
-        f"Answer concisely and directly based on the provided data. Do NOT include introductions or explanations. "
+        f"Act as an immigration consultant and answer the question carefully. Provide different formats of answers based on the question. "
+        f"For example, if the question asks for a roadmap, provide a roadmap format answer. "
+        f"If the question asks for which program you are eligible or fit for, consider all programs not just one."
+        f"if the question is like that it could have multiple answers, provide all possible answers, but explain each answer and explain them why."
+        f"do not start your answer with Based on the provided document, just tell your answer"
+        f"Answer concisely and directly based on the provided data. "
         f"Just return the response for the following request:\n\n"
         f"Query: {query}"
     )
