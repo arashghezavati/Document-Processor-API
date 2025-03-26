@@ -7,16 +7,19 @@ Features a simplified UI for document management and an AI agent system powered 
 ## 🚀 Features & Benefits
 
 ### 📖 AI-Powered Document Search
+
 - Converts documents into vector embeddings for deep search.
 - Stores and retrieves context-aware information using ChromaDB.
 - Supports PDF, DOCX, TXT, HTML, and more.
 
 ### 🤖 AI Chatbot
+
 - Interactive Chatbot UI – Ask AI about stored business data.
 - Customer-Specific Responses – Query business info, customers, and products.
 - CORS-enabled API – Works seamlessly with frontend and Postman.
 
 ### 📤 Document & Folder Management
+
 - Upload documents directly through the simplified UI.
 - Create folders to organize documents.
 - Name documents with custom titles during upload.
@@ -25,6 +28,7 @@ Features a simplified UI for document management and an AI agent system powered 
 - View all documents regardless of folder in the chat interface.
 
 ### 🧠 AI Agent with LangGraph
+
 - Task-based AI agent for complex document operations.
 - Dynamic workflow planning and execution using LangGraph.
 - Natural language task requests (e.g., "Summarize my documents about AI agents").
@@ -34,6 +38,7 @@ Features a simplified UI for document management and an AI agent system powered 
 ## 🔹 How It Works
 
 ### 1️⃣ Document Processing & Storage
+
 ```mermaid
 graph LR
     A[Input Document] --> B[Text Extraction]
@@ -41,12 +46,14 @@ graph LR
     C --> D[Vector Embedding]
     D --> E[ChromaDB Storage]
 ```
+
 - Extracts text from PDFs, DOCX, TXT, and HTML.
 - Splits text into manageable chunks.
 - Embeds text using Google Gemini AI.
 - Stores vectors in ChromaDB for fast retrieval.
 
 ### 2️⃣ AI Chatbot Interaction
+
 ```mermaid
 graph LR
     A[User Query] --> B[Retrieve Documents]
@@ -55,11 +62,13 @@ graph LR
     D --> E[Google Gemini AI Response]
     E --> F[Chatbot UI]
 ```
+
 - Accepts customer-specific queries or queries across all document categories.
 - Searches stored knowledge for relevant data.
 - Uses Google Gemini AI to generate responses.
 
 ### 3️⃣ AI Agent Workflow
+
 ```mermaid
 graph LR
     A[User Task Request] --> B[Authentication]
@@ -68,6 +77,7 @@ graph LR
     D --> E[Task Execution]
     E --> F[Response Generation]
 ```
+
 - Processes natural language task requests.
 - Creates a plan for completing the task.
 - Retrieves relevant documents from the user's collection.
@@ -77,6 +87,7 @@ graph LR
 ## ⚡ Quick Start Guide
 
 ### 1️⃣ Clone & Setup
+
 ```sh
 # Clone the repository
 git clone https://github.com/arashghezavati/Document-Vectorization-Service.git
@@ -92,7 +103,9 @@ pip install -r python-services/requirements.txt
 ```
 
 ### 2️⃣ Configure API Keys
+
 Create a `.env` file in the root directory with the following content:
+
 ```
 GOOGLE_GEMINI_API_KEY=your_api_key_here
 GEMINI_MODEL=gemini-2.0-flash
@@ -102,7 +115,9 @@ EMBEDDING_MODEL=text-embedding-004
 ```
 
 ### 3️⃣ Start the AI Chatbot API
+
 Run the FastAPI backend to enable chatbot functionality:
+
 ```sh
 # Make sure you're in the python-services directory
 cd python-services
@@ -115,6 +130,7 @@ python run_server.py
 - API Docs: http://localhost:8000/docs
 
 ### 4️⃣ Open the Application UI
+
 - Open `http://localhost:3000` in your browser.
 - Register or log in to your account.
 - Navigate through the simplified interface:
@@ -124,12 +140,14 @@ python run_server.py
   - **Tasks**: Submit complex tasks to the AI agent.
 
 ### 5️⃣ Working with Documents
+
 - Create folders to organize your documents.
 - Upload documents with custom names and assign them to folders.
 - All documents will be available in the chat interface regardless of folder.
 - Use the document filter in chat to focus on specific documents.
 
 ### 6️⃣ Using the AI Agent
+
 - Navigate to the Tasks tab.
 - Enter a natural language task request (e.g., "Summarize my documents about AI agents").
 - The agent will process your request, retrieve relevant documents, and generate a response.
