@@ -51,6 +51,7 @@ class ChatRequest(BaseModel):
     folder_name: Optional[str] = None
     document_name: Optional[str] = None
     mode: str = "strict"  # Optional: strict or comprehensive
+    conversation_id: Optional[str] = None  # Add conversation ID
 
 class FolderCreate(BaseModel):
     folder_name: str
@@ -406,10 +407,13 @@ async def get_documents(
             detail=f"Error retrieving documents: {str(e)}"
         )
 
+# In-memory storage for conversation history (can be replaced with a database)
+conversation_memory = {}
+
 @app.post("/chat")
 async def chat(
     request: ChatRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)  # Ensure the user is authenticated
 ):
     """
     Receives chat message and returns AI response based on user's documents.
@@ -418,7 +422,11 @@ async def chat(
     folder_name = request.folder_name
     document_name = request.document_name
     mode = request.mode
-    
+    conversation_id = request.conversation_id or f"{current_user.username}_default"
+
+    # Retrieve conversation history
+    history = conversation_memory.get(conversation_id, [])
+
     # Retrieve documents based on filters AND query for semantic search
     customer_data = retrieve_documents(
         current_user.username,
@@ -438,8 +446,10 @@ async def chat(
             "response": f"⚠️ No relevant documents found in {scope_description}. Please ensure data is uploaded."
         }
 
-    # Construct AI prompt ensuring NO introduction text
+    # Construct AI prompt with conversation history
+    history_text = "\n".join([f"User: {h['query']}\nAI: {h['response']}" for h in history])
     prompt = (
+        f"{history_text}\n\n"
         f"{customer_data}\n\n"
         f"Act as an immigration consultant and answer the question carefully. Provide different formats of answers based on the question. "
         f"For example, if the question asks for a roadmap, provide a roadmap format answer. "
@@ -456,7 +466,28 @@ async def chat(
     # Get AI response
     ai_response = call_ai_model(prompt)
 
-    return {"response": ai_response}
+    # Update conversation history
+    history.append({"query": query, "response": ai_response})
+    conversation_memory[conversation_id] = history[-10:]  # Keep only the last 10 exchanges
+
+    return {"response": ai_response, "conversation_id": conversation_id}
+
+@app.post("/chat/clear")
+async def clear_chat(
+    conversation_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Clears the conversation memory for the given conversation ID.
+    """
+    global conversation_memory
+    conversation_id = conversation_id or f"{current_user.username}_default"
+
+    if conversation_id in conversation_memory:
+        del conversation_memory[conversation_id]
+        return {"status": "success", "message": f"Conversation memory for '{conversation_id}' cleared."}
+    else:
+        return {"status": "success", "message": f"No conversation memory found for '{conversation_id}'."}
 
 # Delete a document
 @app.delete("/documents/{document_name}")
@@ -564,7 +595,7 @@ async def delete_folder(folder_name: str, current_user: User = Depends(get_curre
             documents = collection.get()
             if not documents['ids'] or len(documents['ids']) == 0:
                 print("No documents found in collection")
-                return {"message": f"Folder '{folder_name}' deleted successfully (no documents found)"}
+                return {"message": f"Folder '{folder_name}' deleted successfully (no documents found)"} 
             
             document_ids = documents['ids']
             document_metadatas = documents['metadatas']
@@ -701,3 +732,17 @@ async def process_urls_batch_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing URLs batch: {str(e)}"
         )
+
+@app.post("/chat/clear_all")
+async def clear_all_chat_memory(current_user: User = Depends(get_current_user)):
+    """
+    Clears all conversation memory for the current user.
+    """
+    global conversation_memory
+    user_prefix = f"{current_user.username}_"
+    keys_to_clear = [key for key in conversation_memory if key.startswith(user_prefix)]
+
+    for key in keys_to_clear:
+        del conversation_memory[key]
+
+    return {"status": "success", "message": f"All conversation memory for user '{current_user.username}' cleared."}
