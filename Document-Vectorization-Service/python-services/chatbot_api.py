@@ -793,7 +793,7 @@ def health_check():
     """
     Health check endpoint for monitoring service status
     """
-    return {"status": "healthy", "timestamp": datetime.datetime.now().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 # WebSocket endpoint for real-time updates
 @app.websocket("/ws")
