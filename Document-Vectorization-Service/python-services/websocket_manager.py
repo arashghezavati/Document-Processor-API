@@ -1,95 +1,100 @@
 """
 WebSocket manager for real-time document updates
 """
+from enum import Enum
 from typing import List, Dict, Any
 from fastapi import WebSocket
-from starlette.websockets import WebSocketDisconnect
 import logging
-import json
-import asyncio
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class ConnectionManager:
-    """
-    Manages WebSocket connections and broadcasts messages to connected clients
-    """
-    def __init__(self):
-        # Store active connections by user_id
-        self.active_connections: Dict[str, List[WebSocket]] = {}
-        
-    async def connect(self, websocket: WebSocket, user_id: str):
-        """
-        Accept a new WebSocket connection and store it
-        """
-        await websocket.accept()
-        if user_id not in self.active_connections:
-            self.active_connections[user_id] = []
-        self.active_connections[user_id].append(websocket)
-        logger.info(f"New WebSocket connection for user {user_id}. Total connections: {self.connection_count()}")
-    
-    def disconnect(self, websocket: WebSocket, user_id: str):
-        """
-        Remove a WebSocket connection
-        """
-        if user_id in self.active_connections:
-            if websocket in self.active_connections[user_id]:
-                self.active_connections[user_id].remove(websocket)
-            # Clean up empty lists
-            if not self.active_connections[user_id]:
-                del self.active_connections[user_id]
-        logger.info(f"WebSocket disconnected for user {user_id}. Total connections: {self.connection_count()}")
-    
-    def connection_count(self):
-        """
-        Count total number of active connections
-        """
-        return sum(len(connections) for connections in self.active_connections.values())
-    
-    async def send_personal_message(self, message: Dict[str, Any], user_id: str):
-        """
-        Send a message to a specific user's connections
-        """
-        if user_id in self.active_connections:
-            dead_connections = []
-            for connection in self.active_connections[user_id]:
-                try:
-                    await connection.send_json(message)
-                except Exception as e:
-                    logger.error(f"Error sending message to user {user_id}: {str(e)}")
-                    dead_connections.append(connection)
-            
-            # Clean up dead connections
-            for dead_connection in dead_connections:
-                self.active_connections[user_id].remove(dead_connection)
-            
-            if dead_connections:
-                logger.info(f"Removed {len(dead_connections)} dead connections for user {user_id}")
-    
-    async def broadcast(self, message: Dict[str, Any]):
-        """
-        Broadcast a message to all connected clients
-        """
-        for user_id in list(self.active_connections.keys()):
-            await self.send_personal_message(message, user_id)
-
-# Create a global connection manager instance
-manager = ConnectionManager()
-
-# Event types
-class EventTypes:
+class EventTypes(str, Enum):
+    """Event types for WebSocket notifications"""
     DOCUMENT_ADDED = "document_added"
     DOCUMENT_DELETED = "document_deleted"
-    DOCUMENT_UPDATED = "document_updated"
     FOLDER_ADDED = "folder_added"
     FOLDER_DELETED = "folder_deleted"
+    PROCESSING_COMPLETE = "processing_complete"
+    PROCESSING_ERROR = "processing_error"
 
-async def notify_document_change(user_id: str, event_type: str, data: Dict[str, Any]):
+class ConnectionManager:
+    """Manages WebSocket connections"""
+    
+    def __init__(self):
+        # Store connections by username
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+    
+    async def connect(self, websocket: WebSocket, username: str):
+        """Connect a new client"""
+        await websocket.accept()
+        
+        # Add connection to the user's list
+        if username not in self.active_connections:
+            self.active_connections[username] = []
+        
+        self.active_connections[username].append(websocket)
+        logger.info(f"New WebSocket connection for user {username}. Total connections: {len(self.active_connections)}")
+    
+    def disconnect(self, websocket: WebSocket, username: str):
+        """Disconnect a client"""
+        if username in self.active_connections:
+            # Remove this specific connection
+            try:
+                self.active_connections[username].remove(websocket)
+                
+                # If no more connections for this user, remove the entry
+                if not self.active_connections[username]:
+                    del self.active_connections[username]
+            except ValueError:
+                pass  # Connection might already be removed
+    
+    async def send_personal_message(self, message: str, username: str):
+        """Send a text message to a specific user"""
+        if username in self.active_connections:
+            disconnected = []
+            
+            for connection in self.active_connections[username]:
+                try:
+                    await connection.send_text(message)
+                except Exception:
+                    # Connection might be closed
+                    disconnected.append(connection)
+            
+            # Clean up disconnected connections
+            for conn in disconnected:
+                self.disconnect(conn, username)
+    
+    async def send_personal_json(self, data: Dict[str, Any], username: str):
+        """Send JSON data to a specific user"""
+        if username in self.active_connections:
+            disconnected = []
+            
+            for connection in self.active_connections[username]:
+                try:
+                    await connection.send_json(data)
+                except Exception:
+                    # Connection might be closed
+                    disconnected.append(connection)
+            
+            # Clean up disconnected connections
+            for conn in disconnected:
+                self.disconnect(conn, username)
+
+# Create a singleton manager instance
+manager = ConnectionManager()
+
+async def notify_document_change(username: str, event_type: EventTypes, document_info: Dict[str, Any]):
     """
-    Notify clients about document changes
+    Notify a user about document changes
+    
+    Args:
+        username: The username to notify
+        event_type: Type of event (added, deleted, etc.)
+        document_info: Information about the document
     """
-    message = {
+    await manager.send_personal_json({
         "type": event_type,
-        "data": data
-    }
-    await manager.send_personal_message(message, user_id)
+        "data": document_info
+    }, username)

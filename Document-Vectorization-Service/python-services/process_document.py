@@ -167,6 +167,38 @@ def process_document(file_path, collection_name="default", metadata=None):
         print(f"❌ Error processing document: {str(e)}")
         raise
 
+def chunk_text(text, chunk_size=4000, chunk_overlap=200):
+    """
+    Split text into chunks of specified size with overlap.
+    
+    Args:
+        text (str): The text to split into chunks
+        chunk_size (int): Maximum size of each chunk
+        chunk_overlap (int): Overlap between chunks
+        
+    Returns:
+        list: List of text chunks
+    """
+    if not text:
+        return []
+        
+    # Split text into chunks
+    chunks = []
+    start = 0
+    text_length = len(text)
+    
+    while start < text_length:
+        # Calculate end position
+        end = min(start + chunk_size, text_length)
+        
+        # Add chunk to list
+        chunks.append(text[start:end])
+        
+        # Calculate next start position with overlap
+        start = end - chunk_overlap if end < text_length else text_length
+    
+    return chunks
+
 async def process_url(url, collection_name="default", metadata=None, follow_links=True, max_links=5):
     """
     Process a URL, fetch its content and store it in Qdrant.

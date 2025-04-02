@@ -23,5 +23,9 @@ services:
         sync: false  # This will be set manually in the Render dashboard
       - key: MONGODB_URI
         sync: false  # This will be set manually in the Render dashboard
+      - key: MAX_OUTPUT_TOKENS
+        value: 2048
+      - key: CHROMA_DB_DIR
+        value: vector-database/store
     healthCheckPath: /health
     autoDeploy: true  # Enable auto-deployment on git push
