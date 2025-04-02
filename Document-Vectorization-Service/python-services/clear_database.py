@@ -1,10 +1,9 @@
 import os
-import chromadb
 from auth import get_user
+from qdrant_wrapper import get_qdrant_client
 
-# Initialize ChromaDB Client
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'vector-database', 'store-new')
-chroma_client = chromadb.PersistentClient(path=DB_PATH)
+# Initialize Qdrant Client
+qdrant_client = get_qdrant_client()
 
 def get_user_collection_name(username):
     """Generate a collection name for a specific user."""
@@ -15,7 +14,7 @@ def clear_user_documents(username):
     collection_name = get_user_collection_name(username)
     
     # Check if collection exists
-    collections = chroma_client.list_collections()
+    collections = qdrant_client.list_collections()
     collection_exists = False
     for collection in collections:
         if collection.name == collection_name:
@@ -27,11 +26,11 @@ def clear_user_documents(username):
         return False
     
     # Get the collection
-    collection = chroma_client.get_collection(collection_name)
+    collection = qdrant_client.get_collection(collection_name)
     
     # Get all documents
     try:
-        documents = collection.get()
+        documents = collection.get(include=["ids"])
         if not documents['ids'] or len(documents['ids']) == 0:
             print(f"No documents found in collection '{collection_name}'.")
             return True

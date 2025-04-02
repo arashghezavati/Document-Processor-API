@@ -1,5 +1,4 @@
 import os
-import chromadb
 import google.generativeai as genai
 import shutil
 import tempfile
@@ -9,6 +8,7 @@ from pydantic import BaseModel, HttpUrl
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
 import importlib.util
+from qdrant_wrapper import get_qdrant_client
 
 # Import authentication module
 from auth import (
@@ -41,9 +41,8 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-# Initialize ChromaDB Client
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'vector-database', 'store-new')
-chroma_client = chromadb.PersistentClient(path=DB_PATH)
+# Initialize Qdrant Client
+qdrant_client = get_qdrant_client()
 
 # Define request models
 class ChatRequest(BaseModel):
@@ -77,13 +76,13 @@ def get_user_collection_name(username: str):
 
 def retrieve_documents(username: str, folder_name: Optional[str] = None, document_name: Optional[str] = None, query: Optional[str] = None):
     """
-    Fetches documents from ChromaDB based on user, folder, and document filters.
+    Fetches documents from Qdrant based on user, folder, and document filters.
     If query is provided, performs semantic search to find relevant documents.
     """
     try:
         # Get user's collection
         collection_name = get_user_collection_name(username)
-        collection = chroma_client.get_or_create_collection(name=collection_name)
+        collection = qdrant_client.get_or_create_collection(name=collection_name)
         
         # Build query filter based on folder and document
         where_filter = {}
@@ -106,7 +105,8 @@ def retrieve_documents(username: str, folder_name: Optional[str] = None, documen
                 results = collection.query(
                     query_embeddings=[query_embedding],
                     n_results=5,  # Return top 5 most similar chunks
-                    where=where_filter if where_filter else None
+                    where=where_filter if where_filter else None,
+                    include=["documents", "metadatas", "distances"]
                 )
                 
                 if not results or not results["documents"] or len(results["documents"][0]) == 0:
@@ -366,25 +366,36 @@ async def get_documents(
     try:
         # Get user's collection
         collection_name = get_user_collection_name(current_user.username)
-        collection = chroma_client.get_or_create_collection(name=collection_name)
+        print(f"DEBUG: Getting collection {collection_name}")
+        collection = qdrant_client.get_or_create_collection(name=collection_name)
+        print(f"DEBUG: Collection retrieved successfully")
         
         # Build query filter based on folder
         where_filter = {}
         if folder_name:
             where_filter["folder_name"] = folder_name
+            print(f"DEBUG: Filtering by folder: {folder_name}")
         
         # Query documents with filter
-        if where_filter:
-            results = collection.get(where=where_filter, include=["metadatas"])
-        else:
-            results = collection.get(include=["metadatas"])
+        print(f"DEBUG: About to query documents with filter: {where_filter}")
+        try:
+            if where_filter:
+                results = collection.get(where=where_filter, include=["metadatas"])
+            else:
+                results = collection.get(include=["metadatas"])
+            print(f"DEBUG: Query successful, results: {results}")
+        except Exception as query_error:
+            print(f"DEBUG ERROR: Error during query: {str(query_error)}")
+            raise query_error
         
         # Extract document names from metadata and deduplicate
         documents = []
         seen_documents = set()  # Track unique document names
         
-        if results and results["metadatas"]:
+        print(f"DEBUG: Processing results: {results}")
+        if results and "metadatas" in results and results["metadatas"]:
             for metadata in results["metadatas"]:
+                print(f"DEBUG: Processing metadata: {metadata}")
                 if "document_name" in metadata:
                     doc_name = metadata["document_name"]
                     folder = metadata.get("folder_name", None)
@@ -400,15 +411,17 @@ async def get_documents(
                             "folder": folder
                         })
         
+        print(f"DEBUG: Final documents list: {documents}")
         return {"documents": documents}
     except Exception as e:
+        print(f"DEBUG CRITICAL ERROR: {str(e)}")
+        print(f"DEBUG ERROR TYPE: {type(e)}")
+        import traceback
+        print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving documents: {str(e)}"
         )
-
-# In-memory storage for conversation history (can be replaced with a database)
-conversation_memory = {}
 
 @app.post("/chat")
 async def chat(
@@ -501,7 +514,7 @@ async def delete_document(document_name: str, current_user: User = Depends(get_c
         
         # Check if collection exists
         try:
-            collection = chroma_client.get_collection(collection_name)
+            collection = qdrant_client.get_collection(collection_name)
         except Exception as e:
             print(f"Error getting collection: {str(e)}")
             raise HTTPException(status_code=404, detail="User collection not found")
@@ -574,10 +587,10 @@ async def delete_folder(folder_name: str, current_user: User = Depends(get_curre
             print(f"Error updating MongoDB: {str(mongo_error)}")
             # Continue with document deletion even if folder deletion fails
         
-        # Now delete all documents in this folder from ChromaDB
+        # Now delete all documents in this folder from Qdrant
         try:
             # Check if collection exists first
-            collections = chroma_client.list_collections()
+            collections = qdrant_client.list_collections()
             collection_exists = False
             for coll in collections:
                 if coll.name == collection_name:
@@ -589,7 +602,7 @@ async def delete_folder(folder_name: str, current_user: User = Depends(get_curre
                 # If the collection doesn't exist, we can consider the folder deleted
                 return {"message": f"Folder '{folder_name}' deleted successfully (no collection found)"}
             
-            collection = chroma_client.get_collection(collection_name)
+            collection = qdrant_client.get_collection(collection_name)
             
             # Get all documents
             documents = collection.get()
@@ -618,7 +631,7 @@ async def delete_folder(folder_name: str, current_user: User = Depends(get_curre
                 print(f"Deleted {len(documents_to_delete)} documents from folder '{folder_name}'")
             
         except Exception as chroma_error:
-            print(f"Error deleting documents from ChromaDB: {str(chroma_error)}")
+            print(f"Error deleting documents from Qdrant: {str(chroma_error)}")
             # Continue with folder deletion even if document deletion fails
         
         return {"message": f"Folder '{folder_name}' and all its documents deleted successfully"}
@@ -746,3 +759,6 @@ async def clear_all_chat_memory(current_user: User = Depends(get_current_user)):
         del conversation_memory[key]
 
     return {"status": "success", "message": f"All conversation memory for user '{current_user.username}' cleared."}
+
+# In-memory storage for conversation history (can be replaced with a database)
+conversation_memory = {}

@@ -1,7 +1,6 @@
 import os
 import json
 import xml.etree.ElementTree as ET
-import chromadb
 from dotenv import load_dotenv
 from chunking import chunk_text
 from embedding_function import GeminiEmbeddingFunction
@@ -10,6 +9,7 @@ import asyncio
 import hashlib
 from urllib.parse import urlparse
 from web_content_fetcher import fetch_web_content, process_batch_urls
+from qdrant_wrapper import get_qdrant_client
 
 def extract_text_from_json(file_path):
     """Extract text from JSON file."""
@@ -73,7 +73,7 @@ def get_database_path():
     return db_path
 
 def process_document(file_path, collection_name="default", metadata=None):
-    """Process a document and store it in ChromaDB.
+    """Process a document and store it in Qdrant.
     
     Args:
         file_path (str): Path to the document to process
@@ -133,13 +133,12 @@ def process_document(file_path, collection_name="default", metadata=None):
         chunks = chunk_text(text)
         print(f"✅ Created {len(chunks)} chunks")
         
-        # Initialize ChromaDB
-        print("🔹 Creating embeddings and storing in ChromaDB...")
-        db_path = get_database_path()
-        chroma_client = chromadb.PersistentClient(path=db_path)
+        # Initialize Qdrant client
+        print("🔹 Creating embeddings and storing in Qdrant...")
+        qdrant_client = get_qdrant_client()
         
         embedding_model = GeminiEmbeddingFunction(api_key=api_key)
-        collection = chroma_client.get_or_create_collection(
+        collection = qdrant_client.get_or_create_collection(
             name=collection_name,
             embedding_function=embedding_model
         )
@@ -165,7 +164,7 @@ def process_document(file_path, collection_name="default", metadata=None):
             metadatas=metadatas
         )
         
-        print(f"✅ Successfully added {len(new_doc_ids)} new chunks to ChromaDB")
+        print(f"✅ Successfully added {len(new_doc_ids)} new chunks to Qdrant")
         print("✅ Document processing complete!")
         
     except Exception as e:
@@ -174,7 +173,7 @@ def process_document(file_path, collection_name="default", metadata=None):
 
 async def process_url(url, collection_name="default", metadata=None, follow_links=True, max_links=5):
     """
-    Process a URL, fetch its content and store it in ChromaDB.
+    Process a URL, fetch its content and store it in Qdrant.
     
     Args:
         url (str): URL to process
@@ -216,13 +215,12 @@ async def process_url(url, collection_name="default", metadata=None, follow_link
         chunks = chunk_text(content)
         print(f"✅ Created {len(chunks)} chunks")
         
-        # Initialize ChromaDB
-        print("🔹 Creating embeddings and storing in ChromaDB...")
-        db_path = get_database_path()
-        chroma_client = chromadb.PersistentClient(path=db_path)
+        # Initialize Qdrant
+        print("🔹 Creating embeddings and storing in Qdrant...")
+        qdrant_client = get_qdrant_client()
         
         embedding_model = GeminiEmbeddingFunction(api_key=api_key)
-        collection = chroma_client.get_or_create_collection(
+        collection = qdrant_client.get_or_create_collection(
             name=collection_name,
             embedding_function=embedding_model
         )
@@ -257,7 +255,7 @@ async def process_url(url, collection_name="default", metadata=None, follow_link
             metadatas=metadatas
         )
         
-        print(f"✅ Successfully added {len(new_doc_ids)} new chunks to ChromaDB")
+        print(f"✅ Successfully added {len(new_doc_ids)} new chunks to Qdrant")
         print("✅ URL processing complete!")
         
         return {
