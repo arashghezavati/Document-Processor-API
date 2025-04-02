@@ -72,6 +72,63 @@ def get_database_path():
     os.makedirs(db_path, exist_ok=True)
     return db_path
 
+def chunk_text(text, chunk_size=4000, overlap=200):
+    """
+    Split text into chunks with overlap for better context preservation.
+    
+    Args:
+        text (str): The text to chunk
+        chunk_size (int): Maximum size of each chunk
+        overlap (int): Overlap between chunks
+        
+    Returns:
+        list: List of text chunks
+    """
+    if not text:
+        return []
+    
+    # Normalize whitespace
+    text = ' '.join(text.split())
+    
+    # If text is shorter than chunk_size, return as is
+    if len(text) <= chunk_size:
+        return [text]
+    
+    chunks = []
+    start = 0
+    
+    while start < len(text):
+        # Get chunk of size chunk_size
+        end = start + chunk_size
+        
+        # If we're not at the end of the text, try to find a good break point
+        if end < len(text):
+            # Look for natural break points: periods, question marks, or line breaks
+            # followed by space, within the last 20% of the chunk
+            search_start = end - int(chunk_size * 0.2)
+            search_text = text[search_start:end]
+            
+            # Try to find the last sentence break
+            for pattern in ['. ', '? ', '! ', '\n']:
+                last_break = search_text.rfind(pattern)
+                if last_break != -1:
+                    end = search_start + last_break + 2  # +2 to include the period and space
+                    break
+            
+            # If no natural break found, try to break at a space
+            if end == start + chunk_size:
+                last_space = text.rfind(' ', start, end)
+                if last_space != -1:
+                    end = last_space + 1
+        
+        # Add the chunk
+        chunks.append(text[start:end])
+        
+        # Move start position for next chunk, accounting for overlap
+        start = end - overlap
+    
+    return chunks
+
 def process_document(file_path, collection_name="default", metadata=None):
     """Process a document and store it in Qdrant.
     
