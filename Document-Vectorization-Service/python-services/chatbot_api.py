@@ -11,8 +11,6 @@ import importlib.util
 from qdrant_wrapper import get_qdrant_client
 from websocket_manager import manager, notify_document_change, EventTypes
 from datetime import datetime, timedelta
-import time
-from qdrant_client import models
 
 # Import authentication module
 from auth import (
@@ -85,37 +83,7 @@ def retrieve_documents(username: str, folder_name: Optional[str] = None, documen
     try:
         # Get user's collection
         collection_name = get_user_collection_name(username)
-        
-        try:
-            collection = qdrant_client.get_or_create_collection(name=collection_name)
-        except Exception as coll_error:
-            print(f"Error getting collection: {str(coll_error)}")
-            # Try a direct approach if the wrapper fails
-            try:
-                # Get the raw client
-                raw_client = qdrant_client.client
-                
-                # Check if collection exists by listing collections
-                collections = raw_client.get_collections().collections
-                collection_names = [c.name for c in collections]
-                
-                if collection_name not in collection_names:
-                    # Create collection if it doesn't exist
-                    vector_size = int(os.getenv("EMBEDDING_DIMENSION", "768"))
-                    raw_client.create_collection(
-                        collection_name=collection_name,
-                        vectors_config=models.VectorParams(
-                            size=vector_size,
-                            distance=models.Distance.COSINE
-                        )
-                    )
-                    print(f"Created collection {collection_name} directly")
-                
-                # Now get the collection through the wrapper
-                collection = qdrant_client.get_or_create_collection(name=collection_name)
-            except Exception as direct_error:
-                print(f"Direct collection creation also failed: {str(direct_error)}")
-                return None
+        collection = qdrant_client.get_or_create_collection(name=collection_name)
         
         # Build query filter based on folder and document
         where_filter = {}
@@ -134,172 +102,46 @@ def retrieve_documents(username: str, folder_name: Optional[str] = None, documen
             query_embedding = embedding_func([query])[0]
             
             # Perform semantic search with metadata filtering
-            max_retries = 2
-            for retry in range(max_retries + 1):
-                try:
-                    results = collection.query(
-                        query_embeddings=[query_embedding],
-                        n_results=5,  # Return top 5 most similar chunks
-                        where=where_filter if where_filter else None,
-                        include=["documents", "metadatas", "distances"]
-                    )
-                    
-                    if not results or not results["documents"] or len(results["documents"][0]) == 0:
-                        print(f"⚠️ No semantic search results found for query: {query}")
-                        if retry < max_retries:
-                            print(f"Retrying semantic search (attempt {retry+1}/{max_retries})")
-                            time.sleep(1)
-                            continue
-                        # Fall back to direct search if all retries fail
-                        break
-                    
-                    # Join the most relevant documents into a single string
-                    documents_text = "\n\n".join(results["documents"][0])
-                    print(f"🔍 Retrieved Documents via semantic search for {username}: {len(results['documents'][0])} chunks")
-                    return documents_text
-                except Exception as retry_error:
-                    print(f"Error in semantic search attempt {retry+1}: {str(retry_error)}")
-                    if retry < max_retries:
-                        time.sleep(1)
-                        continue
-                    else:
-                        # Fall back to direct search
-                        break
-            
-            # If we get here, semantic search failed - try direct vector search
-            print("⚠️ Trying direct vector search as fallback")
             try:
-                # Use the raw client for direct search
-                raw_client = qdrant_client.client
-                
-                # Convert filter to Qdrant format
-                filter_query = None
-                if where_filter:
-                    conditions = []
-                    for key, value in where_filter.items():
-                        conditions.append(models.FieldCondition(
-                            key=key,
-                            match=models.MatchValue(value=value)
-                        ))
-                    filter_query = models.Filter(must=conditions)
-                
-                # Perform direct search
-                search_results = raw_client.search(
-                    collection_name=collection_name,
-                    query_vector=query_embedding,
-                    limit=5,
-                    query_filter=filter_query,
-                    with_payload=True
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=5,  # Return top 5 most similar chunks
+                    where=where_filter if where_filter else None,
+                    include=["documents", "metadatas", "distances"]
                 )
                 
-                if not search_results:
-                    print("⚠️ No results from direct vector search")
-                    # Fall back to metadata-only retrieval
-                else:
-                    # Extract text from payloads
-                    documents = []
-                    for point in search_results:
-                        if hasattr(point, 'payload') and point.payload and 'text' in point.payload:
-                            documents.append(point.payload['text'])
-                    
-                    if documents:
-                        documents_text = "\n\n".join(documents)
-                        print(f"🔍 Retrieved Documents via direct vector search: {len(documents)} chunks")
-                        return documents_text
-            except Exception as direct_search_error:
-                print(f"❌ Error in direct vector search: {str(direct_search_error)}")
-            
-            print("⚠️ Falling back to metadata-only retrieval")
-            # Continue with regular metadata filtering below
+                if not results or not results["documents"] or len(results["documents"][0]) == 0:
+                    print(f"⚠️ No semantic search results found for query: {query}")
+                    return None  # No documents found
+                
+                # Join the most relevant documents into a single string
+                documents_text = "\n\n".join(results["documents"][0])
+                print(f"🔍 Retrieved Documents via semantic search for {username}: {len(results['documents'][0])} chunks")
+                return documents_text
+                
+            except Exception as e:
+                print(f"❌ Error in semantic search: {str(e)}")
+                # Fall back to metadata-only retrieval if semantic search fails
+                print("⚠️ Falling back to metadata-only retrieval")
+                
+                # Continue with regular metadata filtering below
         
         # Query documents with filter (used when no query is provided or as fallback)
-        try:
-            # Add retry logic for get operations
-            max_retries = 2
-            for retry in range(max_retries + 1):
-                try:
-                    if where_filter:
-                        docs = collection.get(where=where_filter, include=["documents", "metadatas"])
-                    else:
-                        docs = collection.get(include=["documents", "metadatas"])
-                    
-                    if not docs or not docs["documents"] or len(docs["documents"]) == 0:
-                        print(f"⚠️ No documents found via metadata filter")
-                        if retry < max_retries:
-                            print(f"Retrying metadata retrieval (attempt {retry+1}/{max_retries})")
-                            time.sleep(1)
-                            continue
-                        return None  # No documents found after all retries
-                    
-                    # Join all documents into a single string
-                    documents_text = "\n\n".join(docs["documents"])
-                    print(f"🔍 Retrieved Documents for {username} via metadata filter: {len(docs['documents'])} chunks")
-                    return documents_text
-                except Exception as retry_error:
-                    print(f"Error in metadata retrieval attempt {retry+1}: {str(retry_error)}")
-                    if retry < max_retries:
-                        time.sleep(1)
-                    else:
-                        # Try one last approach - direct scroll through the collection
-                        try:
-                            print("⚠️ Trying direct scroll as last resort")
-                            raw_client = qdrant_client.client
-                            
-                            # Use scroll to get all documents
-                            all_docs = []
-                            offset = None
-                            
-                            while True:
-                                scroll_result = raw_client.scroll(
-                                    collection_name=collection_name,
-                                    limit=100,
-                                    with_payload=True,
-                                    offset=offset
-                                )
-                                
-                                points, offset = scroll_result
-                                
-                                # Filter points based on metadata if needed
-                                if where_filter:
-                                    filtered_points = []
-                                    for point in points:
-                                        if hasattr(point, 'payload'):
-                                            matches_filter = True
-                                            for key, value in where_filter.items():
-                                                if key not in point.payload or point.payload[key] != value:
-                                                    matches_filter = False
-                                                    break
-                                            if matches_filter:
-                                                filtered_points.append(point)
-                                    points = filtered_points
-                                
-                                # Extract text from payloads
-                                for point in points:
-                                    if hasattr(point, 'payload') and point.payload and 'text' in point.payload:
-                                        all_docs.append(point.payload['text'])
-                                
-                                if not offset or len(all_docs) >= 100:  # Limit to avoid too much data
-                                    break
-                            
-                            if all_docs:
-                                documents_text = "\n\n".join(all_docs)
-                                print(f"🔍 Retrieved Documents via direct scroll: {len(all_docs)} chunks")
-                                return documents_text
-                            else:
-                                return None
-                        except Exception as scroll_error:
-                            print(f"❌ Error in direct scroll: {str(scroll_error)}")
-                            return None
-        except Exception as e:
-            print(f"❌ Error retrieving documents: {str(e)}")
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
-            return None
+        if where_filter:
+            docs = collection.get(where=where_filter, include=["documents", "metadatas"])
+        else:
+            docs = collection.get(include=["documents", "metadatas"])
+        
+        if not docs or not docs["documents"]:
+            return None  # No documents found
+        
+        # Join all documents into a single string
+        documents_text = "\n\n".join(docs["documents"])
+        print(f"🔍 Retrieved Documents for {username} via metadata filter: {len(docs['documents'])} chunks")
+        return documents_text
     
     except Exception as e:
         print(f"❌ Error retrieving documents: {str(e)}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
         return None
 
 def call_ai_model(prompt: str):
