@@ -1,15 +1,15 @@
 # Document Processing & AI Chatbot Service
 
-A powerful Python service that processes documents (PDF, DOCX, TXT, HTML) and makes them searchable and interactive using AI-powered vector embeddings. Built with ChromaDB for efficient vector storage and retrieval, and Google Gemini AI for intelligent response generation.
+A powerful Python service that processes documents (PDF, DOCX, TXT, HTML) and makes them searchable and interactive using AI-powered vector embeddings. Built with Qdrant for efficient vector storage and retrieval, and Google Gemini AI for intelligent response generation.
 
-Features a simplified UI for document management and an AI agent system powered by LangGraph for complex document processing tasks.
+Features a simplified UI for document management and an AI agent system for complex document processing tasks.
 
 ## 🚀 Features & Benefits
 
 ### 📖 AI-Powered Document Search
 
 - Converts documents into vector embeddings for deep search.
-- Stores and retrieves context-aware information using ChromaDB.
+- Stores and retrieves context-aware information using Qdrant vector database.
 - Supports PDF, DOCX, TXT, HTML, and more.
 
 ### 🤖 AI Chatbot
@@ -26,113 +26,110 @@ Features a simplified UI for document management and an AI agent system powered 
 - Assign documents to specific folders.
 - Delete documents and folders as needed.
 - View all documents regardless of folder in the chat interface.
+- Real-time updates via WebSockets when documents are added or deleted.
 
-- Natural language task requests (e.g., "Summarize my documents about AI agents").
-- User-specific document access with proper authentication.
-- Document context integration for informed responses.
-- Dynamic workflow planning and execution using LangGraph.
+### 🔐 Enhanced Authentication System
 
-### 🔐 Enhanced Authentication System task requests (e.g., "Summarize my documents about AI agents").
-
-- Secure JWT token-based authentication- User-specific document access with proper authentication.
-- Strong password validation with multiple criteriaformed responses.
+- Secure JWT token-based authentication
+- Strong password validation with multiple criteria
 - Automatic token validation and expiration handling
-- Protected routes and API endpointsw It Works
+- Protected routes and API endpoints
 - Environment-specific configurations
-- User session management and clean logout processg & Storage
+- User session management and clean logout process
 
 ## 🔹 How It Works
 
-ph LR
-
 ### 1️⃣ Document Processing & Storage
 
-````mermaid
+```mermaid
 graph LR
     A[Input Document] --> B[Text Extraction]
-    B --> C[Text Chunking]```
+    B --> C[Semantic Chunking]
     C --> D[Vector Embedding]
-    D --> E[ChromaDB Storage] text from PDFs, DOCX, TXT, and HTML.
-``` text into manageable chunks.
-- Extracts text from PDFs, DOCX, TXT, and HTML.
-- Splits text into manageable chunks.retrieval.
-- Embeds text using Google Gemini AI.
-- Stores vectors in ChromaDB for fast retrieval.
+    D --> E[Qdrant Storage]
+```
 
-### 2️⃣ AI Chatbot Interactionmermaid
+- Extracts text from PDFs, DOCX, TXT, and HTML.
+- Uses semantic chunking to split text into meaningful chunks with overlap.
+- Embeds text using Google Gemini AI.
+- Stores vectors in Qdrant for fast retrieval.
+
+### 2️⃣ AI Chatbot Interaction
+
 ```mermaid
 graph LR
     A[User Query] --> B[Retrieve Documents]
-    B --> C[Vector Search in ChromaDB]    C --> D[Construct AI Prompt]
-    C --> D[Construct AI Prompt] AI Response]
-    D --> E[Google Gemini AI Response]F[Chatbot UI]
+    B --> C[Vector Search in Qdrant]
+    C --> D[Construct AI Prompt]
+    D --> E[Google Gemini AI Response]
     E --> F[Chatbot UI]
-````
+```
 
-- Accepts customer-specific queries or queries across all document categories.c queries or queries across all document categories.
-- Searches stored knowledge for relevant data. relevant data.
-- Uses Google Gemini AI to generate responses.generate responses.
+- Accepts customer-specific queries or queries across all document categories.
+- Searches stored knowledge for relevant data.
+- Uses Google Gemini AI to generate responses.
 
-### 3️⃣ AI Agent Workflow 3️⃣ AI Agent Workflow
+### 3️⃣ Real-time Updates
 
-````mermaid
+```mermaid
 graph LR
-    A[User Task Request] --> B[Authentication]
-    B --> C[Plan Creation]on]
-    C --> D[Document Retrieval]
-    D --> E[Task Execution]    C --> D[Document Retrieval]
-    E --> F[Response Generation]tion]
-```    E --> F[Response Generation]
-- Processes natural language task requests.
-- Creates a plan for completing the task.
-- Retrieves relevant documents from the user's collection.nguage task requests.
-- Executes the task using document context.
-- Generates a comprehensive response.om the user's collection.
-- Executes the task using document context.
-### 4️⃣ Authentication Flowsponse.
+    A[Document Change] --> B[WebSocket Event]
+    B --> C[Client Notification]
+    C --> D[UI Update]
+```
+
+- Uses WebSockets for real-time communication between server and client.
+- Instantly notifies clients when documents are added, updated, or deleted.
+- Eliminates the need for polling, improving performance and user experience.
+
+### 4️⃣ Authentication Flow
+
 ```mermaid
 graph LR
     A[User Credentials] --> B[JWT Token Generation]
-    B --> C[Token Storage]### 1️⃣ Clone & Setup
+    B --> C[Token Storage]
     C --> D[Protected Routes/APIs]
     D --> E[Token Validation]
-    E --> F[Auto Refresh/Logout]lone the repository
-```git clone https://github.com/arashghezavati/Document-Vectorization-Service.git
-- Secures user sessions with JWT tokensService
+    E --> F[Auto Refresh/Logout]
+```
+
+- Secures user sessions with JWT tokens
 - Validates credentials against database
-- Protects sensitive routes and API endpointsreate a virtual environment
+- Protects sensitive routes and API endpoints
 - Handles token expiration gracefully
-inux/Mac
+
 ## ⚡ Quick Start Guides
 
 ### 1️⃣ Clone & Setup
-```sh install -r python-services/requirements.txt
-# Clone the repository```
+
+```sh
+# Clone the repository
 git clone https://github.com/arashghezavati/Document-Vectorization-Service.git
 cd Document-Vectorization-Service
 
-# Create a virtual environment following content:
+# Create a virtual environment
 python -m venv venv
-source venv/bin/activate  # Linux/Mac```
-.\venv\Scripts\activate   # Windowsyour_api_key_here
-2.0-flash
-# Install dependencies_SECRET_KEY=your_jwt_secret_key
-pip install -r python-services/requirements.txtEMBEDDING_DIMENSION=768
-````
+source venv/bin/activate  # Linux/Mac
+.\venv\Scripts\activate   # Windows
+
+# Install dependencies
+pip install -r python-services/requirements.txt
+```
 
 ### 2️⃣ Configure API Keys
 
-Create a `.env` file in the root directory with the following content:I
+Create a `.env` file in the root directory with the following content:
 
 ```
-GOOGLE_GEMINI_API_KEY=your_api_key_heretbot functionality:
+GOOGLE_GEMINI_API_KEY=your_api_key_here
 GEMINI_MODEL=gemini-2.0-flash
 JWT_SECRET_KEY=your_jwt_secret_key
 EMBEDDING_DIMENSION=768
-EMBEDDING_MODEL=text-embedding-004
-```
 
-# Start the API server
+# Qdrant Configuration
+QDRANT_URL=your_qdrant_cloud_url
+QDRANT_API_KEY=your_qdrant_api_key
+```
 
 ### 3️⃣ Start the AI Chatbot API
 
@@ -142,44 +139,75 @@ Run the FastAPI backend to enable chatbot functionality:
 # Make sure you're in the python-services directory
 cd python-services
 
-# Start the API serveron UI
+# Start the API server
 python run_server.py
 ```
 
-- Backend URL: http://localhost:8000- Navigate through the simplified interface:
-- API Docs: http://localhost:8000/docserview of your documents and folders.
-  - **Documents**: Create folders and upload documents.
+- Backend URL: http://localhost:8000
+- API Docs: http://localhost:8000/docs
 
-### 4️⃣ Open the Application UIabout your documents.
+### 4️⃣ Open the Application UI
 
-- Open `http://localhost:3000` in your browser.ex tasks to the AI agent.
+- Open `http://localhost:3000` in your browser.
 - Register or log in to your account.
 - Navigate through the simplified interface:
   - **Dashboard**: Overview of your documents and folders.
   - **Documents**: Create folders and upload documents.
-  - **Chat**: Interact with the AI chatbot about your documents.- Upload documents with custom names and assign them to folders.
-  - **Tasks**: Submit complex tasks to the AI agent.ll be available in the chat interface regardless of folder.
-- Use the document filter in chat to focus on specific documents.
+  - **Chat**: Interact with the AI chatbot about your documents.
 
 ### 5️⃣ Working with Documents
 
-- Create folders to organize your documents.### 6️⃣ Using the AI Agent
+- Create folders to organize your documents.
 - Upload documents with custom names and assign them to folders.
 - All documents will be available in the chat interface regardless of folder.
-- Use the document filter in chat to focus on specific documents.nts about AI agents").
-  s, and generate a response.
+- Use the document filter in chat to focus on specific documents.
+- Experience real-time updates when documents are added or deleted.
 
-### 6️⃣ Using the AI Agent
+## 🔧 Technical Stack
 
-- Navigate to the Tasks tab.## 🔧 Technical Stack
-- Enter a natural language task request (e.g., "Summarize my documents about AI agents").
-- The agent will process your request, retrieve relevant documents, and generate a response.- **Backend**: FastAPI, ChromaDB, LangGraph
-
-For support, please open an issue in the GitHub repository or contact the maintainers directly.## 📩 Support5. Open a Pull Request4. Push to the branch (`git push origin feature/amazing-feature`)3. Commit your changes (`git commit -m 'Add some amazing feature'`)2. Create your feature branch (`git checkout -b feature/amazing-feature`)1. Fork the repositoryContributions are welcome! Please feel free to submit a Pull Request.## 🤝 Contributing- **Document Processing**: PyPDF2, python-docx, BeautifulSoup- **Database**: ChromaDB for vector storage- **Authentication**: JWT-based authentication- **Frontend**: React.js- **AI**: Google Gemini API- **Backend**: FastAPI, ChromaDB, LangGraph## 🔧 Technical Stack- **Protected Resources**: Secure access to documents and chat functionality- **Token Management**: Automatic handling of token expiration- **JWT-based Sessions**: Secure, stateless authentication- **Secure Sign-Up**: With strong password requirements (uppercase, lowercase, numbers, special characters)Our authentication implementation provides:## 🔧 Authentication SystemSet the environment using `REACT_APP_ENV` environment variable.- **Test**: For running automated tests- **Production**: Live deployment with optimized settings- **Development**: Local testing with debugging enabledThe application supports multiple environments through the configuration system:## 🛠️ Environment Configuration- **Frontend**: React.js
-
+- **Backend**: FastAPI, Qdrant, WebSockets
+- **Frontend**: React.js
 - **Authentication**: JWT-based authentication
-- **Database**: ChromaDB for vector storage
-- **Document Processing**: PyPDF2, python-docx, BeautifulSoup
+- **Database**: Qdrant Cloud for vector storage
+- **Document Processing**: PyPDF2, python-docx, BeautifulSoup, Semantic Chunking
+- **AI**: Google Gemini API
+
+## 🔍 Recent Improvements
+
+### Migration to Qdrant
+- Replaced ChromaDB with Qdrant for improved performance and scalability
+- Implemented a QdrantWrapper class to maintain compatibility with existing code
+- Added robust error handling for vector operations
+
+### Semantic Chunking
+- Implemented advanced semantic chunking that respects document structure
+- Added chunk overlap to maintain context between chunks
+- Increased chunk size from 1000 to 4000 characters for better context
+- Enhanced metadata extraction for improved retrieval
+
+### Real-time Updates with WebSockets
+- Implemented WebSocket communication for instant updates
+- Eliminated polling to reduce server load and improve performance
+- Added real-time notifications for document and folder changes
+
+## 🛠️ Environment Configuration
+
+The application supports multiple environments through the configuration system:
+
+- **Development**: Local testing with debugging enabled
+- **Production**: Live deployment with optimized settings
+- **Test**: For running automated tests
+
+Set the environment using `REACT_APP_ENV` environment variable.
+
+## 🔧 Authentication System
+
+Our authentication implementation provides:
+
+- **Secure Sign-Up**: With strong password requirements (uppercase, lowercase, numbers, special characters)
+- **JWT-based Sessions**: Secure, stateless authentication
+- **Token Management**: Automatic handling of token expiration
+- **Protected Resources**: Secure access to documents and chat functionality
 
 ## 🤝 Contributing
 
@@ -194,3 +222,13 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 📩 Support
 
 For support, please open an issue in the GitHub repository or contact the maintainers directly.
+
+## 🚀 Deployment Options
+
+The application can be deployed on various platforms:
+
+- **Render**: Free tier available with sleep/wake cycles, or $7/month for always-on service
+- **Railway**: $5/month minimum with no sleep/wake cycles
+- **AWS**: More customizable but requires more configuration
+
+For most users, Render provides the best balance of cost and performance.
