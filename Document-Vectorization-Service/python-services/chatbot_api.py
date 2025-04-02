@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 import importlib.util
 from qdrant_wrapper import get_qdrant_client
 from websocket_manager import manager, notify_document_change, EventTypes
+from datetime import datetime, timedelta
 
 # Import authentication module
 from auth import (
@@ -17,7 +18,6 @@ from auth import (
     authenticate_user, create_user, create_access_token,
     get_current_user, create_folder, get_user_folders
 )
-from datetime import timedelta
 
 # Load environment variables
 load_dotenv()
@@ -787,8 +787,13 @@ async def clear_all_chat_memory(current_user: User = Depends(get_current_user)):
 
     return {"status": "success", "message": f"All conversation memory for user '{current_user.username}' cleared."}
 
-# In-memory storage for conversation history (can be replaced with a database)
-conversation_memory = {}
+# Health check endpoint for Render
+@app.get("/health")
+def health_check():
+    """
+    Health check endpoint for monitoring service status
+    """
+    return {"status": "healthy", "timestamp": datetime.datetime.now().isoformat()}
 
 # WebSocket endpoint for real-time updates
 @app.websocket("/ws")
@@ -839,3 +844,6 @@ async def get_current_user_ws(token: str):
         return get_current_user_from_token(token)
     except:
         return None
+
+# In-memory storage for conversation history (can be replaced with a database)
+conversation_memory = {}
