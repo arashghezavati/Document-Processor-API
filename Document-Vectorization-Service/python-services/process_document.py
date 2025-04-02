@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from semantic_chunking import chunk_document
 from embedding_function import GeminiEmbeddingFunction
 from unstructured.partition.auto import partition
-import docx
 import asyncio
 import hashlib
 from urllib.parse import urlparse
