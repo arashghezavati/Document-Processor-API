@@ -1,6 +1,5 @@
 import google.generativeai as genai
-from chromadb.api.types import Documents, EmbeddingFunction
-from typing import List
+from typing import List, Protocol, Any
 import numpy as np
 import os
 from dotenv import load_dotenv
@@ -10,7 +9,12 @@ load_dotenv()
 EMBEDDING_DIMENSION = int(os.getenv('EMBEDDING_DIMENSION', '768'))
 EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'text-embedding-004')
 
-class GeminiEmbeddingFunction(EmbeddingFunction):
+# Define a protocol for embedding functions
+class EmbeddingFunction(Protocol):
+    def __call__(self, texts: List[str]) -> List[List[float]]:
+        ...
+
+class GeminiEmbeddingFunction:
     """Embedding function that uses Google's Gemini API for embeddings."""
     
     def __init__(self, api_key: str):
@@ -21,11 +25,11 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
         """
         genai.configure(api_key=api_key)
         
-    def __call__(self, texts: Documents) -> List[List[float]]:
+    def __call__(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for the given texts using Gemini's embedding API.
         
         Args:
-            texts (Documents): List of texts to generate embeddings for
+            texts (List[str]): List of texts to generate embeddings for
             
         Returns:
             List[List[float]]: List of embeddings
