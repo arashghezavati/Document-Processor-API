@@ -106,6 +106,20 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise credentials_exception
     return user
 
+def get_current_user_from_token(token: str):
+    """
+    Get the current user from a token string directly (for WebSocket authentication)
+    """
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+        user = get_user(username=username)
+        return user
+    except jwt.PyJWTError:
+        return None
+
 # User management functions
 def create_user(user: UserCreate):
     # Check if username already exists

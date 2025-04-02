@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from auth import (
     User, UserCreate, Token, 
     authenticate_user, create_user, create_access_token,
-    get_current_user, create_folder, get_user_folders
+    get_current_user, create_folder, get_user_folders, get_current_user_from_token
 )
 
 # Load environment variables
@@ -853,7 +853,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     """
     try:
         # Validate the token
-        user = await get_current_user_ws(token)
+        user = get_current_user_from_token(token)
         if not user:
             await websocket.close(code=1008, reason="Invalid token")
             return
@@ -883,17 +883,6 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             await websocket.close(code=1011, reason=f"Internal server error: {str(e)}")
         except:
             pass
-
-# Helper function to get user from token for WebSocket connections
-async def get_current_user_ws(token: str):
-    """
-    Get the current user from a token for WebSocket connections
-    """
-    from auth import get_current_user_from_token
-    try:
-        return get_current_user_from_token(token)
-    except:
-        return None
 
 # In-memory storage for conversation history (can be replaced with a database)
 conversation_memory = {}
