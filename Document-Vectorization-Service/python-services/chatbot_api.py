@@ -3,12 +3,13 @@ import google.generativeai as genai
 import shutil
 import tempfile
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, status, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, status, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, HttpUrl
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
 import importlib.util
 from qdrant_wrapper import get_qdrant_client
+from websocket_manager import manager, notify_document_change, EventTypes
 
 # Import authentication module
 from auth import (
@@ -242,49 +243,57 @@ async def upload_document(
     """
     Upload and process a document into a user's collection
     """
+    if not file:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+    
+    # Create a temporary file to store the uploaded content
+    temp_dir = tempfile.mkdtemp()
+    temp_file_path = os.path.join(temp_dir, file.filename)
+    
     try:
-        # Validate folder if provided
-        if folder_name and folder_name not in get_user_folders(current_user.username):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Folder '{folder_name}' does not exist"
-            )
+        # Save the uploaded file to the temporary location
+        with open(temp_file_path, "wb") as f:
+            contents = await file.read()
+            f.write(contents)
         
-        # Create temp file
-        temp_dir = tempfile.mkdtemp()
-        temp_file_path = os.path.join(temp_dir, file.filename)
-        
-        # Save uploaded file
-        with open(temp_file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        # Process the document with user-specific collection
+        # Get the user's collection name
         collection_name = get_user_collection_name(current_user.username)
         
-        # Add metadata for folder and document name
+        # Prepare metadata
         metadata = {
-            "document_name": file.filename
+            "username": current_user.username,
         }
+        
         if folder_name:
             metadata["folder_name"] = folder_name
-            
+        
         # Process the document
         process_document.process_document(
-            temp_file_path, 
-            collection_name, 
+            file_path=temp_file_path,
+            collection_name=collection_name,
             metadata=metadata
         )
         
-        # Clean up
-        shutil.rmtree(temp_dir)
-        
-        return {
-            "status": "success", 
-            "message": f"Document {file.filename} successfully processed" + 
-                      (f" into folder {folder_name}" if folder_name else "")
+        # Notify connected clients about the new document
+        document_info = {
+            "name": file.filename,
+            "folder": folder_name
         }
+        
+        # Use asyncio.create_task to run the notification in the background
+        import asyncio
+        asyncio.create_task(notify_document_change(
+            current_user.username, 
+            EventTypes.DOCUMENT_ADDED, 
+            document_info
+        ))
+        
+        return {"status": "success", "message": f"Document '{file.filename}' processed successfully"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(status_code=500, detail=f"Error processing document: {str(e)}")
+    finally:
+        # Clean up temporary files
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 @app.post("/upload-multiple")
 async def upload_multiple_documents(
@@ -366,24 +375,19 @@ async def get_documents(
     try:
         # Get user's collection
         collection_name = get_user_collection_name(current_user.username)
-        print(f"DEBUG: Getting collection {collection_name}")
         collection = qdrant_client.get_or_create_collection(name=collection_name)
-        print(f"DEBUG: Collection retrieved successfully")
         
         # Build query filter based on folder
         where_filter = {}
         if folder_name:
             where_filter["folder_name"] = folder_name
-            print(f"DEBUG: Filtering by folder: {folder_name}")
         
         # Query documents with filter
-        print(f"DEBUG: About to query documents with filter: {where_filter}")
         try:
             if where_filter:
                 results = collection.get(where=where_filter, include=["metadatas"])
             else:
                 results = collection.get(include=["metadatas"])
-            print(f"DEBUG: Query successful, results: {results}")
         except Exception as query_error:
             print(f"DEBUG ERROR: Error during query: {str(query_error)}")
             raise query_error
@@ -392,10 +396,8 @@ async def get_documents(
         documents = []
         seen_documents = set()  # Track unique document names
         
-        print(f"DEBUG: Processing results: {results}")
         if results and "metadatas" in results and results["metadatas"]:
             for metadata in results["metadatas"]:
-                print(f"DEBUG: Processing metadata: {metadata}")
                 if "document_name" in metadata:
                     doc_name = metadata["document_name"]
                     folder = metadata.get("folder_name", None)
@@ -411,7 +413,6 @@ async def get_documents(
                             "folder": folder
                         })
         
-        print(f"DEBUG: Final documents list: {documents}")
         return {"documents": documents}
     except Exception as e:
         print(f"DEBUG CRITICAL ERROR: {str(e)}")
@@ -505,12 +506,12 @@ async def clear_chat(
 # Delete a document
 @app.delete("/documents/{document_name}")
 async def delete_document(document_name: str, current_user: User = Depends(get_current_user)):
+    """
+    Delete a document from a user's collection
+    """
     try:
-        # Get user's collection with correct naming
-        collection_name = f"user_{current_user.username}_docs"
-        
-        # Debug print
-        print(f"Attempting to delete document: '{document_name}' from collection: '{collection_name}'")
+        # Get user's collection
+        collection_name = get_user_collection_name(current_user.username)
         
         # Check if collection exists
         try:
@@ -519,70 +520,92 @@ async def delete_document(document_name: str, current_user: User = Depends(get_c
             print(f"Error getting collection: {str(e)}")
             raise HTTPException(status_code=404, detail="User collection not found")
         
-        # Check if collection is empty
-        try:
-            documents = collection.get()
-            if not documents['ids']:
-                raise HTTPException(status_code=404, detail="No documents found in collection")
-        except Exception as e:
-            print(f"Error getting documents: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error retrieving documents: {str(e)}")
+        # Get all documents to find the one to delete
+        results = collection.get(include=["metadatas"])
         
-        document_ids = documents['ids']
-        document_metadatas = documents['metadatas']
+        if not results or not results["metadatas"]:
+            raise HTTPException(status_code=404, detail=f"No documents found for user {current_user.username}")
         
-        # Debug print all document names
-        print(f"Available documents: {[meta.get('document_name', 'Unknown') for meta in document_metadatas]}")
+        # Find documents with matching name
+        documents_to_delete = []
+        print(f"Available documents: {[meta.get('document_name') for meta in results['metadatas']]}")
         
-        # Find the document by name
-        document_index = None
-        for i, metadata in enumerate(document_metadatas):
-            doc_name = metadata.get('document_name', '')
-            print(f"Comparing: '{doc_name}' with '{document_name}'")
-            if doc_name == document_name:
-                document_index = i
+        for i, metadata in enumerate(results["metadatas"]):
+            document_name_in_db = metadata.get("document_name")
+            print(f"Comparing: '{document_name_in_db}' with '{document_name}'")
+            
+            if document_name_in_db == document_name:
                 print(f"Match found at index {i}")
-                break
+                documents_to_delete.append(results["ids"][i])
         
-        if document_index is None:
+        if not documents_to_delete:
             raise HTTPException(status_code=404, detail=f"Document '{document_name}' not found")
         
         # Delete the document
-        document_id = document_ids[document_index]
-        print(f"Deleting document with ID: {document_id}")
-        collection.delete(ids=[document_id])
+        for doc_id in documents_to_delete:
+            print(f"Deleting document with ID: {doc_id}")
+            collection.delete(ids=[doc_id])
         
-        return {"message": f"Document '{document_name}' deleted successfully"}
+        # Notify connected clients about the deleted document
+        document_info = {
+            "name": document_name
+        }
+        
+        # Use asyncio.create_task to run the notification in the background
+        import asyncio
+        asyncio.create_task(notify_document_change(
+            current_user.username, 
+            EventTypes.DOCUMENT_DELETED, 
+            document_info
+        ))
+        
+        return {"status": "success", "message": f"Document '{document_name}' deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error in delete_document: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
 
 # Delete a folder and all its documents
 @app.delete("/folders/{folder_name}")
 async def delete_folder(folder_name: str, current_user: User = Depends(get_current_user)):
+    """
+    Delete a folder and all its documents
+    """
     try:
-        # Get user's collection with correct naming
-        collection_name = f"user_{current_user.username}_docs"
-        
-        print(f"Attempting to delete folder: '{folder_name}' for user: '{current_user.username}'")
-        
-        # First check if the folder exists in user's folders
-        user_folders = get_user_folders(current_user.username)
-        print(f"User folders: {user_folders}")
-        
-        if folder_name not in user_folders:
-            print(f"Folder '{folder_name}' not found in user's folders list")
-            # We'll continue anyway to clean up any documents that might be in this folder
-        
-        # Delete folder from MongoDB - use try/except to handle potential errors
+        # First, delete the folder from MongoDB
         try:
-            result = users_collection.update_one(
-                {"username": current_user.username},
-                {"$pull": {"folders": folder_name}}
-            )
-            print(f"MongoDB update result: {result.modified_count} documents modified")
+            # Check if the folder exists
+            user_folders = get_user_folders(current_user.username)
+            folder_exists = False
+            
+            for folder in user_folders:
+                if folder["name"] == folder_name:
+                    folder_exists = True
+                    break
+            
+            if not folder_exists:
+                raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found")
+            
+            # Delete the folder from MongoDB
+            from pymongo import MongoClient
+            
+            # Get MongoDB connection string from environment
+            mongodb_uri = os.getenv("MONGODB_URI")
+            if not mongodb_uri:
+                raise HTTPException(status_code=500, detail="MongoDB connection string not found in environment")
+            
+            client = MongoClient(mongodb_uri)
+            db = client.get_default_database()
+            
+            # Delete the folder
+            result = db.folders.delete_one({
+                "username": current_user.username,
+                "name": folder_name
+            })
+            
+            if result.deleted_count == 0:
+                raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found in database")
+            
         except Exception as mongo_error:
             print(f"Error updating MongoDB: {str(mongo_error)}")
             # Continue with document deletion even if folder deletion fails
@@ -592,13 +615,14 @@ async def delete_folder(folder_name: str, current_user: User = Depends(get_curre
             # Check if collection exists first
             collections = qdrant_client.list_collections()
             collection_exists = False
+            collection_name = get_user_collection_name(current_user.username)
+            
             for coll in collections:
                 if coll.name == collection_name:
                     collection_exists = True
                     break
             
             if not collection_exists:
-                print(f"Collection '{collection_name}' does not exist")
                 # If the collection doesn't exist, we can consider the folder deleted
                 return {"message": f"Folder '{folder_name}' deleted successfully (no collection found)"}
             
@@ -606,27 +630,20 @@ async def delete_folder(folder_name: str, current_user: User = Depends(get_curre
             
             # Get all documents
             documents = collection.get()
-            if not documents['ids'] or len(documents['ids']) == 0:
-                print("No documents found in collection")
-                return {"message": f"Folder '{folder_name}' deleted successfully (no documents found)"} 
             
-            document_ids = documents['ids']
-            document_metadatas = documents['metadatas']
+            if not documents or not documents["metadatas"]:
+                # No documents found, folder is effectively deleted
+                return {"message": f"Folder '{folder_name}' deleted successfully (no documents found)"}
             
-            print(f"Found {len(document_ids)} documents in collection")
-            
-            # Find documents in the folder
+            # Find documents in the folder to delete
             documents_to_delete = []
-            for i, metadata in enumerate(document_metadatas):
-                folder = metadata.get('folder_name', '')
-                print(f"Document {i} folder: '{folder}'")
-                if folder == folder_name:
-                    documents_to_delete.append(document_ids[i])
             
-            print(f"Found {len(documents_to_delete)} documents to delete in folder '{folder_name}'")
+            for i, metadata in enumerate(documents["metadatas"]):
+                if metadata.get("folder_name") == folder_name:
+                    documents_to_delete.append(documents["ids"][i])
             
-            # Delete documents in the folder
             if documents_to_delete:
+                # Delete the documents
                 collection.delete(ids=documents_to_delete)
                 print(f"Deleted {len(documents_to_delete)} documents from folder '{folder_name}'")
             
@@ -634,14 +651,24 @@ async def delete_folder(folder_name: str, current_user: User = Depends(get_curre
             print(f"Error deleting documents from Qdrant: {str(chroma_error)}")
             # Continue with folder deletion even if document deletion fails
         
+        # Notify connected clients about the deleted folder
+        folder_info = {
+            "name": folder_name
+        }
+        
+        # Use asyncio.create_task to run the notification in the background
+        import asyncio
+        asyncio.create_task(notify_document_change(
+            current_user.username, 
+            EventTypes.FOLDER_DELETED, 
+            folder_info
+        ))
+        
         return {"message": f"Folder '{folder_name}' and all its documents deleted successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error in delete_folder: {str(e)}")
-        # Include the full error details in the response
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Full error traceback: {error_details}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete folder: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error deleting folder: {str(e)}")
 
 @app.post("/process_url")
 async def process_url_endpoint(
@@ -762,3 +789,53 @@ async def clear_all_chat_memory(current_user: User = Depends(get_current_user)):
 
 # In-memory storage for conversation history (can be replaced with a database)
 conversation_memory = {}
+
+# WebSocket endpoint for real-time updates
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket, token: str):
+    """
+    WebSocket endpoint for real-time updates
+    """
+    try:
+        # Validate the token
+        user = await get_current_user_ws(token)
+        if not user:
+            await websocket.close(code=1008, reason="Invalid token")
+            return
+        
+        # Accept the connection
+        await manager.connect(websocket, user.username)
+        
+        # Send initial confirmation
+        await websocket.send_json({
+            "type": "connection_established",
+            "data": {
+                "username": user.username
+            }
+        })
+        
+        # Keep the connection alive and handle messages
+        try:
+            while True:
+                # Wait for messages from the client
+                data = await websocket.receive_text()
+                # You can handle client messages here if needed
+        except WebSocketDisconnect:
+            manager.disconnect(websocket, user.username)
+    except Exception as e:
+        print(f"WebSocket error: {str(e)}")
+        try:
+            await websocket.close(code=1011, reason=f"Internal server error: {str(e)}")
+        except:
+            pass
+
+# Helper function to get user from token for WebSocket connections
+async def get_current_user_ws(token: str):
+    """
+    Get the current user from a token for WebSocket connections
+    """
+    from auth import get_current_user_from_token
+    try:
+        return get_current_user_from_token(token)
+    except:
+        return None
