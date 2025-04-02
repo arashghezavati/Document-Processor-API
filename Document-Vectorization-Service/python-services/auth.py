@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # MongoDB connection
-MONGO_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+# MongoDB Atlas connection string
+MONGO_URI = "mongodb+srv://arash:1439716%40Ah@cluster0.8sdodg2.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 client = MongoClient(MONGO_URI)
 db = client["Document-Vectorization-Service"]
 users_collection = db["users"]
