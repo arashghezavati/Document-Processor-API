@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from auth import (
     User, UserCreate, Token, 
     authenticate_user, create_user, create_access_token,
-    get_current_user, create_folder, get_user_folders, get_current_user_from_token
+    get_current_user, create_folder, get_user_folders
 )
 
 # Load environment variables
@@ -83,136 +83,62 @@ def retrieve_documents(username: str, folder_name: Optional[str] = None, documen
     try:
         # Get user's collection
         collection_name = get_user_collection_name(username)
-        print(f"Retrieving documents for user {username} from collection {collection_name}")
-        
-        # Try to get collection
-        try:
-            collection = qdrant_client.get_or_create_collection(name=collection_name)
-        except Exception as e:
-            print(f"❌ Error getting collection: {str(e)}")
-            # Try a different method to get the collection
-            print("Trying alternate method to get collection")
-            collections = qdrant_client.list_collections()
-            if collection_name not in [col.name for col in collections]:
-                print(f"Collection {collection_name} not found in available collections")
-                return None
-            collection = qdrant_client.get_collection(name=collection_name)
+        collection = qdrant_client.get_or_create_collection(name=collection_name)
         
         # Build query filter based on folder and document
         where_filter = {}
         if folder_name:
             where_filter["folder_name"] = folder_name
-            print(f"Filtering by folder: {folder_name}")
         if document_name:
             where_filter["document_name"] = document_name
-            print(f"Filtering by document: {document_name}")
-        
-        print(f"Using filter: {where_filter}")
         
         # If query is provided, perform semantic search
         if query:
-            print(f"Performing semantic search for query: {query}")
             # Import embedding function
             from embedding_function import GeminiEmbeddingFunction
             embedding_func = GeminiEmbeddingFunction(api_key=GOOGLE_GEMINI_API_KEY)
             
             # Convert query to embedding
+            query_embedding = embedding_func([query])[0]
+            
+            # Perform semantic search with metadata filtering
             try:
-                query_embedding = embedding_func([query])[0]
-                print("Successfully generated query embedding")
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=5,  # Return top 5 most similar chunks
+                    where=where_filter if where_filter else None,
+                    include=["documents", "metadatas", "distances"]
+                )
                 
-                # Perform semantic search with metadata filtering
-                try:
-                    # Increase n_results to retrieve more potentially relevant chunks
-                    n_results = 10  # Get more results
-                    print(f"Querying collection with filter: {where_filter}")
-                    results = collection.query(
-                        query_embeddings=[query_embedding],
-                        n_results=n_results,
-                        where=where_filter if where_filter else None,
-                        include=["documents", "metadatas", "distances"]
-                    )
-                    
-                    if not results or not results["documents"] or len(results["documents"][0]) == 0:
-                        print(f"⚠️ No semantic search results found for query: {query}")
-                        
-                        # Fallback: retrieve all documents matching metadata filters
-                        print("Falling back to metadata-only retrieval")
-                        if where_filter:
-                            docs = collection.get(where=where_filter, include=["documents", "metadatas"])
-                        else:
-                            docs = collection.get(include=["documents", "metadatas"])
-                        
-                        if docs and docs["documents"] and len(docs["documents"]) > 0:
-                            documents_text = "\n\n".join(docs["documents"])
-                            print(f"Retrieved {len(docs['documents'])} documents via fallback method")
-                            return documents_text
-                            
-                        # Second fallback: try getting some documents without filters
-                        print("Trying second fallback: retrieve without filters")
-                        docs = collection.get(limit=5, include=["documents"])
-                        if docs and docs["documents"] and len(docs["documents"]) > 0:
-                            documents_text = "\n\n".join(docs["documents"])
-                            print(f"Retrieved {len(docs['documents'])} documents via second fallback")
-                            return documents_text
-                            
-                        return None
-                    
-                    # Join the most relevant documents into a single string
-                    documents_text = "\n\n".join(results["documents"][0])
-                    print(f"🔍 Retrieved {len(results['documents'][0])} documents via semantic search for {username}")
-                    
-                    # Add similarity scores for debugging
-                    for i, (doc, dist) in enumerate(zip(results["documents"][0][:5], results["distances"][0][:5])):
-                        similarity = 1.0 - dist
-                        print(f"Document {i+1}: Similarity: {similarity:.4f}")
-                        
-                    return documents_text
-                    
-                except Exception as e:
-                    print(f"❌ Error in semantic search query: {str(e)}")
-                    print("Falling back to metadata-only retrieval")
-                    
+                if not results or not results["documents"] or len(results["documents"][0]) == 0:
+                    print(f"⚠️ No semantic search results found for query: {query}")
+                    return None  # No documents found
+                
+                # Join the most relevant documents into a single string
+                documents_text = "\n\n".join(results["documents"][0])
+                print(f"🔍 Retrieved Documents via semantic search for {username}: {len(results['documents'][0])} chunks")
+                return documents_text
+                
             except Exception as e:
-                print(f"❌ Error generating embedding: {str(e)}")
-                print("Falling back to metadata-only retrieval")
+                print(f"❌ Error in semantic search: {str(e)}")
+                # Fall back to metadata-only retrieval if semantic search fails
+                print("⚠️ Falling back to metadata-only retrieval")
+                
+                # Continue with regular metadata filtering below
         
         # Query documents with filter (used when no query is provided or as fallback)
-        print("Retrieving documents with metadata filter")
-        try:
-            if where_filter:
-                print(f"Using filter: {where_filter}")
-                docs = collection.get(where=where_filter, include=["documents", "metadatas"])
-            else:
-                print("Getting all documents (no filter)")
-                docs = collection.get(include=["documents", "metadatas"])
-            
-            if not docs or not docs["documents"] or len(docs["documents"]) == 0:
-                print("No documents found with metadata filter")
-                
-                # Try without filter as last resort
-                print("Trying without filter as last resort")
-                try:
-                    docs = collection.get(limit=5, include=["documents", "metadatas"])
-                    if not docs or not docs["documents"] or len(docs["documents"]) == 0:
-                        print("Still no documents found, returning None")
-                        return None
-                except Exception as e:
-                    print(f"Error in final retrieval attempt: {str(e)}")
-                    return None
-            
-            # Debug print
-            print(f"Found {len(docs['documents'])} documents with metadata filter")
-            if len(docs['documents']) > 0:
-                print(f"First document sample: {docs['documents'][0][:100]}...")
-            
-            # Join all documents into a single string
-            documents_text = "\n\n".join(docs["documents"])
-            print(f"🔍 Retrieved {len(docs['documents'])} documents for {username} via metadata filter")
-            return documents_text
-        except Exception as e:
-            print(f"❌ Error in metadata retrieval: {str(e)}")
-            return None
+        if where_filter:
+            docs = collection.get(where=where_filter, include=["documents", "metadatas"])
+        else:
+            docs = collection.get(include=["documents", "metadatas"])
+        
+        if not docs or not docs["documents"]:
+            return None  # No documents found
+        
+        # Join all documents into a single string
+        documents_text = "\n\n".join(docs["documents"])
+        print(f"🔍 Retrieved Documents for {username} via metadata filter: {len(docs['documents'])} chunks")
+        return documents_text
     
     except Exception as e:
         print(f"❌ Error retrieving documents: {str(e)}")
@@ -449,104 +375,54 @@ async def get_documents(
     try:
         # Get user's collection
         collection_name = get_user_collection_name(current_user.username)
+        collection = qdrant_client.get_or_create_collection(name=collection_name)
         
+        # Build query filter based on folder
+        where_filter = {}
+        if folder_name:
+            where_filter["folder_name"] = folder_name
+        
+        # Query documents with filter
         try:
-            # Try to get the collection with more robust error handling
-            collection = qdrant_client.get_or_create_collection(name=collection_name)
-            
-            # Build query filter based on folder
-            where_filter = {}
-            if folder_name:
-                where_filter["folder_name"] = folder_name
-            
-            # Query documents with filter - with enhanced error handling
-            try:
-                # Add retry logic for Render deployment
-                max_retries = 2
-                retry_count = 0
-                
-                while retry_count <= max_retries:
-                    try:
-                        if where_filter:
-                            results = collection.get(where=where_filter, include=["metadatas"])
-                        else:
-                            results = collection.get(include=["metadatas"])
-                        
-                        # If we got here, the query was successful
-                        break
-                    except Exception as retry_error:
-                        retry_count += 1
-                        print(f"Retry {retry_count}/{max_retries} after error: {str(retry_error)}")
-                        
-                        if retry_count > max_retries:
-                            # We've exhausted our retries, try a different approach
-                            print("Trying alternative approach to retrieve documents...")
-                            # Use a direct search with a dummy vector as a fallback
-                            vector_size = int(os.getenv("EMBEDDING_DIMENSION", "768"))
-                            dummy_vector = [0.0] * vector_size
-                            
-                            search_result = collection.client.search(
-                                collection_name=collection_name,
-                                query_vector=dummy_vector,
-                                limit=1000,  # High limit to get all documents
-                                with_payload=True
-                            )
-                            
-                            # Manually construct a result similar to what collection.get would return
-                            results = {
-                                "metadatas": []
-                            }
-                            
-                            for point in search_result:
-                                if hasattr(point, 'payload') and point.payload:
-                                    results["metadatas"].append(point.payload)
-                            
-                            print(f"Alternative approach retrieved {len(results['metadatas'])} documents")
-                            break
-                        
-                        # Wait before retrying (exponential backoff)
-                        import time
-                        time.sleep(1 * retry_count)
-            except Exception as query_error:
-                print(f"DEBUG ERROR: Error during query: {str(query_error)}")
-                # Return empty results instead of raising an error
-                return {"documents": []}
-            
-            # Extract document names from metadata and deduplicate
-            documents = []
-            seen_documents = set()  # Track unique document names
-            
-            if results and "metadatas" in results and results["metadatas"]:
-                for metadata in results["metadatas"]:
-                    if "document_name" in metadata:
-                        doc_name = metadata["document_name"]
-                        folder = metadata.get("folder_name", None)
-                        
-                        # Create a unique key for each document+folder combination
-                        doc_key = f"{doc_name}|{folder}"
-                        
-                        # Only add if we haven't seen this document before
-                        if doc_key not in seen_documents:
-                            seen_documents.add(doc_key)
-                            documents.append({
-                                "name": doc_name,
-                                "folder": folder
-                            })
-            
-            return {"documents": documents}
-        except Exception as collection_error:
-            print(f"Error with collection operations: {str(collection_error)}")
-            # Return empty results instead of raising an error
-            return {"documents": []}
-            
+            if where_filter:
+                results = collection.get(where=where_filter, include=["metadatas"])
+            else:
+                results = collection.get(include=["metadatas"])
+        except Exception as query_error:
+            print(f"DEBUG ERROR: Error during query: {str(query_error)}")
+            raise query_error
+        
+        # Extract document names from metadata and deduplicate
+        documents = []
+        seen_documents = set()  # Track unique document names
+        
+        if results and "metadatas" in results and results["metadatas"]:
+            for metadata in results["metadatas"]:
+                if "document_name" in metadata:
+                    doc_name = metadata["document_name"]
+                    folder = metadata.get("folder_name", None)
+                    
+                    # Create a unique key for each document+folder combination
+                    doc_key = f"{doc_name}|{folder}"
+                    
+                    # Only add if we haven't seen this document before
+                    if doc_key not in seen_documents:
+                        seen_documents.add(doc_key)
+                        documents.append({
+                            "name": doc_name,
+                            "folder": folder
+                        })
+        
+        return {"documents": documents}
     except Exception as e:
         print(f"DEBUG CRITICAL ERROR: {str(e)}")
         print(f"DEBUG ERROR TYPE: {type(e)}")
         import traceback
         print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
-        
-        # Return empty results instead of raising an error for better user experience
-        return {"documents": []}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving documents: {str(e)}"
+        )
 
 @app.post("/chat")
 async def chat(
@@ -561,9 +437,6 @@ async def chat(
     document_name = request.document_name
     mode = request.mode
     conversation_id = request.conversation_id or f"{current_user.username}_default"
-
-    print(f"Processing chat query: '{query}' from user: {current_user.username}")
-    print(f"Folder: {folder_name}, Document: {document_name}, Mode: {mode}")
 
     # Retrieve conversation history
     history = conversation_memory.get(conversation_id, [])
@@ -589,16 +462,9 @@ async def chat(
 
     # Construct AI prompt with conversation history
     history_text = "\n".join([f"User: {h['query']}\nAI: {h['response']}" for h in history])
-    
-    # Truncate document content if it's too long to avoid token limits
-    max_content_length = 20000
-    if len(customer_data) > max_content_length:
-        print(f"Truncating document content from {len(customer_data)} to {max_content_length} characters")
-        customer_data = customer_data[:max_content_length] + "...(content truncated due to length)"
-    
     prompt = (
         f"{history_text}\n\n"
-        f"Document content:\n{customer_data}\n\n"
+        f"{customer_data}\n\n"
         f"Act as an immigration consultant and answer the question carefully. Provide different formats of answers based on the question. "
         f"For example, if the question asks for a roadmap, provide a roadmap format answer. "
         f"If the question asks for which program you are eligible or fit for, consider all programs not just one."
@@ -609,12 +475,10 @@ async def chat(
         f"Query: {query}"
     )
 
-    print(f"Sending prompt to AI model ({len(prompt)} characters)")
+    print(f"📩 AI Debug - Constructed Prompt: {prompt}")  # Debugging
 
     # Get AI response
     ai_response = call_ai_model(prompt)
-    
-    print(f"Received AI response ({len(ai_response)} characters)")
 
     # Update conversation history
     history.append({"query": query, "response": ai_response})
@@ -939,7 +803,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     """
     try:
         # Validate the token
-        user = get_current_user_from_token(token)
+        user = await get_current_user_ws(token)
         if not user:
             await websocket.close(code=1008, reason="Invalid token")
             return
@@ -969,6 +833,17 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             await websocket.close(code=1011, reason=f"Internal server error: {str(e)}")
         except:
             pass
+
+# Helper function to get user from token for WebSocket connections
+async def get_current_user_ws(token: str):
+    """
+    Get the current user from a token for WebSocket connections
+    """
+    from auth import get_current_user_from_token
+    try:
+        return get_current_user_from_token(token)
+    except:
+        return None
 
 # In-memory storage for conversation history (can be replaced with a database)
 conversation_memory = {}
