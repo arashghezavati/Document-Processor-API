@@ -83,82 +83,136 @@ def retrieve_documents(username: str, folder_name: Optional[str] = None, documen
     try:
         # Get user's collection
         collection_name = get_user_collection_name(username)
-        collection = qdrant_client.get_or_create_collection(name=collection_name)
+        print(f"Retrieving documents for user {username} from collection {collection_name}")
+        
+        # Try to get collection
+        try:
+            collection = qdrant_client.get_or_create_collection(name=collection_name)
+        except Exception as e:
+            print(f"❌ Error getting collection: {str(e)}")
+            # Try a different method to get the collection
+            print("Trying alternate method to get collection")
+            collections = qdrant_client.list_collections()
+            if collection_name not in [col.name for col in collections]:
+                print(f"Collection {collection_name} not found in available collections")
+                return None
+            collection = qdrant_client.get_collection(name=collection_name)
         
         # Build query filter based on folder and document
         where_filter = {}
         if folder_name:
             where_filter["folder_name"] = folder_name
+            print(f"Filtering by folder: {folder_name}")
         if document_name:
             where_filter["document_name"] = document_name
+            print(f"Filtering by document: {document_name}")
+        
+        print(f"Using filter: {where_filter}")
         
         # If query is provided, perform semantic search
         if query:
+            print(f"Performing semantic search for query: {query}")
             # Import embedding function
             from embedding_function import GeminiEmbeddingFunction
             embedding_func = GeminiEmbeddingFunction(api_key=GOOGLE_GEMINI_API_KEY)
             
             # Convert query to embedding
-            query_embedding = embedding_func([query])[0]
-            
-            # Perform semantic search with metadata filtering
             try:
-                # Increase n_results to retrieve more potentially relevant chunks
-                n_results = 10  # Get more results
-                results = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=n_results,
-                    where=where_filter if where_filter else None,
-                    include=["documents", "metadatas", "distances"]
-                )
+                query_embedding = embedding_func([query])[0]
+                print("Successfully generated query embedding")
                 
-                if not results or not results["documents"] or len(results["documents"][0]) == 0:
-                    print(f"⚠️ No semantic search results found for query: {query}")
+                # Perform semantic search with metadata filtering
+                try:
+                    # Increase n_results to retrieve more potentially relevant chunks
+                    n_results = 10  # Get more results
+                    print(f"Querying collection with filter: {where_filter}")
+                    results = collection.query(
+                        query_embeddings=[query_embedding],
+                        n_results=n_results,
+                        where=where_filter if where_filter else None,
+                        include=["documents", "metadatas", "distances"]
+                    )
                     
-                    # Fallback: retrieve all documents matching metadata filters
+                    if not results or not results["documents"] or len(results["documents"][0]) == 0:
+                        print(f"⚠️ No semantic search results found for query: {query}")
+                        
+                        # Fallback: retrieve all documents matching metadata filters
+                        print("Falling back to metadata-only retrieval")
+                        if where_filter:
+                            docs = collection.get(where=where_filter, include=["documents", "metadatas"])
+                        else:
+                            docs = collection.get(include=["documents", "metadatas"])
+                        
+                        if docs and docs["documents"] and len(docs["documents"]) > 0:
+                            documents_text = "\n\n".join(docs["documents"])
+                            print(f"Retrieved {len(docs['documents'])} documents via fallback method")
+                            return documents_text
+                            
+                        # Second fallback: try getting some documents without filters
+                        print("Trying second fallback: retrieve without filters")
+                        docs = collection.get(limit=5, include=["documents"])
+                        if docs and docs["documents"] and len(docs["documents"]) > 0:
+                            documents_text = "\n\n".join(docs["documents"])
+                            print(f"Retrieved {len(docs['documents'])} documents via second fallback")
+                            return documents_text
+                            
+                        return None
+                    
+                    # Join the most relevant documents into a single string
+                    documents_text = "\n\n".join(results["documents"][0])
+                    print(f"🔍 Retrieved {len(results['documents'][0])} documents via semantic search for {username}")
+                    
+                    # Add similarity scores for debugging
+                    for i, (doc, dist) in enumerate(zip(results["documents"][0][:5], results["distances"][0][:5])):
+                        similarity = 1.0 - dist
+                        print(f"Document {i+1}: Similarity: {similarity:.4f}")
+                        
+                    return documents_text
+                    
+                except Exception as e:
+                    print(f"❌ Error in semantic search query: {str(e)}")
                     print("Falling back to metadata-only retrieval")
-                    if where_filter:
-                        docs = collection.get(where=where_filter, include=["documents", "metadatas"])
-                    else:
-                        docs = collection.get(include=["documents", "metadatas"])
                     
-                    if docs and docs["documents"] and len(docs["documents"]) > 0:
-                        documents_text = "\n\n".join(docs["documents"])
-                        print(f"Retrieved {len(docs['documents'])} documents via fallback method")
-                        return documents_text
-                    return None
-                
-                # Join the most relevant documents into a single string
-                documents_text = "\n\n".join(results["documents"][0])
-                print(f"🔍 Retrieved {len(results['documents'][0])} documents via semantic search for {username}")
-                
-                # Add similarity scores for debugging
-                for i, (doc, dist) in enumerate(zip(results["documents"][0][:5], results["distances"][0][:5])):
-                    similarity = 1.0 - dist
-                    print(f"Document {i+1}: Similarity: {similarity:.4f}")
-                    
-                return documents_text
-                
             except Exception as e:
-                print(f"❌ Error in semantic search: {str(e)}")
-                # Fall back to metadata-only retrieval if semantic search fails
-                print("⚠️ Falling back to metadata-only retrieval")
-                
-                # Continue with regular metadata filtering below
+                print(f"❌ Error generating embedding: {str(e)}")
+                print("Falling back to metadata-only retrieval")
         
         # Query documents with filter (used when no query is provided or as fallback)
-        if where_filter:
-            docs = collection.get(where=where_filter, include=["documents", "metadatas"])
-        else:
-            docs = collection.get(include=["documents", "metadatas"])
-        
-        if not docs or not docs["documents"] or len(docs["documents"]) == 0:
-            return None  # No documents found
-        
-        # Join all documents into a single string
-        documents_text = "\n\n".join(docs["documents"])
-        print(f"🔍 Retrieved {len(docs['documents'])} documents for {username} via metadata filter")
-        return documents_text
+        print("Retrieving documents with metadata filter")
+        try:
+            if where_filter:
+                print(f"Using filter: {where_filter}")
+                docs = collection.get(where=where_filter, include=["documents", "metadatas"])
+            else:
+                print("Getting all documents (no filter)")
+                docs = collection.get(include=["documents", "metadatas"])
+            
+            if not docs or not docs["documents"] or len(docs["documents"]) == 0:
+                print("No documents found with metadata filter")
+                
+                # Try without filter as last resort
+                print("Trying without filter as last resort")
+                try:
+                    docs = collection.get(limit=5, include=["documents", "metadatas"])
+                    if not docs or not docs["documents"] or len(docs["documents"]) == 0:
+                        print("Still no documents found, returning None")
+                        return None
+                except Exception as e:
+                    print(f"Error in final retrieval attempt: {str(e)}")
+                    return None
+            
+            # Debug print
+            print(f"Found {len(docs['documents'])} documents with metadata filter")
+            if len(docs['documents']) > 0:
+                print(f"First document sample: {docs['documents'][0][:100]}...")
+            
+            # Join all documents into a single string
+            documents_text = "\n\n".join(docs["documents"])
+            print(f"🔍 Retrieved {len(docs['documents'])} documents for {username} via metadata filter")
+            return documents_text
+        except Exception as e:
+            print(f"❌ Error in metadata retrieval: {str(e)}")
+            return None
     
     except Exception as e:
         print(f"❌ Error retrieving documents: {str(e)}")
@@ -535,6 +589,13 @@ async def chat(
 
     # Construct AI prompt with conversation history
     history_text = "\n".join([f"User: {h['query']}\nAI: {h['response']}" for h in history])
+    
+    # Truncate document content if it's too long to avoid token limits
+    max_content_length = 20000
+    if len(customer_data) > max_content_length:
+        print(f"Truncating document content from {len(customer_data)} to {max_content_length} characters")
+        customer_data = customer_data[:max_content_length] + "...(content truncated due to length)"
+    
     prompt = (
         f"{history_text}\n\n"
         f"Document content:\n{customer_data}\n\n"
