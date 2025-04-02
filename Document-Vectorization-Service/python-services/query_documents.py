@@ -45,18 +45,57 @@ def retrieve_documents(query_text, collection_name=None):
             collections = [qdrant_client.get_collection(name=col, embedding_function=embedding_model) for col in all_collections]
 
         for collection in collections:
-            total_docs = get_total_documents(collection)
-            results = collection.query(
-                query_texts=[query_text], 
-                n_results=total_docs,
-                include=["documents", "metadatas", "distances"]
-            )
+            # First try to get total docs count
+            try:
+                total_docs = get_total_documents(collection)
+                print(f"Collection has {total_docs} documents")
+            except Exception as e:
+                print(f"Error getting document count: {str(e)}")
+                total_docs = 10  # Default to retrieving 10 documents
 
-            if 'documents' in results and results['documents']:
-                for doc, distance in zip(results['documents'][0], results['distances'][0]):
-                    similarity = max(0, 1 - distance)  # Ensure similarity is never negative
-                    retrieved_docs.append((doc, similarity))
+            # Increase n_results to retrieve more potential matches
+            n_results = min(total_docs, 20)  # Get up to 20 results
+            
+            try:
+                # Generate query embedding
+                print(f"Generating embedding for query: {query_text}")
+                # Query with more results and lower threshold
+                results = collection.query(
+                    query_texts=[query_text], 
+                    n_results=n_results,
+                    include=["documents", "metadatas", "distances"]
+                )
+                
+                if 'documents' in results and results['documents'] and len(results['documents'][0]) > 0:
+                    print(f"Found {len(results['documents'][0])} matching documents")
+                    for i, (doc, distance) in enumerate(zip(results['documents'][0], results['distances'][0])):
+                        # Include documents even with lower similarity scores
+                        similarity = max(0, 1 - distance)  # Ensure similarity is never negative
+                        retrieved_docs.append((doc, similarity))
+                        print(f"  Doc {i+1}: Similarity score: {similarity:.4f}")
+                else:
+                    print("No matching documents found with semantic search")
+                    # Fallback: get all documents from collection
+                    print("Falling back to retrieving all documents")
+                    all_docs = collection.get(include=["documents"])
+                    if all_docs and 'documents' in all_docs and all_docs['documents']:
+                        print(f"Retrieved {len(all_docs['documents'])} documents as fallback")
+                        for doc in all_docs['documents']:
+                            # Assign a moderate similarity score to all documents
+                            retrieved_docs.append((doc, 0.5))
+            except Exception as query_error:
+                print(f"Error during query: {str(query_error)}")
+                # Try a fallback approach
+                try:
+                    print("Attempting fallback retrieval method")
+                    all_docs = collection.get(limit=10, include=["documents"])
+                    if all_docs and 'documents' in all_docs and all_docs['documents']:
+                        for doc in all_docs['documents']:
+                            retrieved_docs.append((doc, 0.5))  # Default similarity
+                except Exception as fallback_error:
+                    print(f"Fallback retrieval failed: {str(fallback_error)}")
 
+        # Sort by similarity score, highest first
         retrieved_docs.sort(key=lambda x: x[1], reverse=True)
         return retrieved_docs
 
@@ -89,17 +128,38 @@ def query_collection(query_text, collection_name=None, mode="strict"):
 
     if not retrieved_docs:
         print("⚠ No relevant documents found in the database.")
-        return
+        return "No relevant documents found to answer your query. Please try a different question or add more documents."
 
-    document_context = "\n\n".join([doc[0] for doc in retrieved_docs])
+    # Print what we found
+    print(f"Retrieved {len(retrieved_docs)} documents for query: '{query_text}'")
+    
+    # Use all documents but focus on the top ones
+    document_context = "\n\n".join([doc[0] for doc in retrieved_docs[:10]])  # Limit to 10 docs
+    
+    # Create more focused prompt
+    if mode == "comprehensive":
+        prompt = f"""Here are relevant documents:
 
-    response = (
-        generate_response_gemini(f"Here are relevant documents:\n\n{document_context}\n\nNow answer: {query_text}")
-        if mode == "comprehensive"
-        else f"Based on the following documents, answer: '{query_text}'\n\n{document_context}"
-    )
+{document_context}
 
+Based on ONLY the information provided above, please answer the following question:
+"{query_text}"
+
+If the answer cannot be found in the provided documents, please say so instead of making up information."""
+    else:
+        prompt = f"""Based on the following documents, answer this question: '{query_text}'
+
+Documents:
+{document_context}
+
+Answer ONLY using information from the documents provided. If the information is not in the documents, say "I don't have that information in the documents."
+"""
+    
+    print(f"Generating AI response based on {len(retrieved_docs[:10])} relevant documents")
+    response = generate_response_gemini(prompt)
+    
     print("\n🤖 AI Response:\n", response)
+    return response
 
 if __name__ == "__main__":
     import sys

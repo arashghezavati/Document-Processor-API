@@ -103,20 +103,40 @@ def retrieve_documents(username: str, folder_name: Optional[str] = None, documen
             
             # Perform semantic search with metadata filtering
             try:
+                # Increase n_results to retrieve more potentially relevant chunks
+                n_results = 10  # Get more results
                 results = collection.query(
                     query_embeddings=[query_embedding],
-                    n_results=5,  # Return top 5 most similar chunks
+                    n_results=n_results,
                     where=where_filter if where_filter else None,
                     include=["documents", "metadatas", "distances"]
                 )
                 
                 if not results or not results["documents"] or len(results["documents"][0]) == 0:
                     print(f"⚠️ No semantic search results found for query: {query}")
-                    return None  # No documents found
+                    
+                    # Fallback: retrieve all documents matching metadata filters
+                    print("Falling back to metadata-only retrieval")
+                    if where_filter:
+                        docs = collection.get(where=where_filter, include=["documents", "metadatas"])
+                    else:
+                        docs = collection.get(include=["documents", "metadatas"])
+                    
+                    if docs and docs["documents"] and len(docs["documents"]) > 0:
+                        documents_text = "\n\n".join(docs["documents"])
+                        print(f"Retrieved {len(docs['documents'])} documents via fallback method")
+                        return documents_text
+                    return None
                 
                 # Join the most relevant documents into a single string
                 documents_text = "\n\n".join(results["documents"][0])
-                print(f"🔍 Retrieved Documents via semantic search for {username}: {len(results['documents'][0])} chunks")
+                print(f"🔍 Retrieved {len(results['documents'][0])} documents via semantic search for {username}")
+                
+                # Add similarity scores for debugging
+                for i, (doc, dist) in enumerate(zip(results["documents"][0][:5], results["distances"][0][:5])):
+                    similarity = 1.0 - dist
+                    print(f"Document {i+1}: Similarity: {similarity:.4f}")
+                    
                 return documents_text
                 
             except Exception as e:
@@ -132,12 +152,12 @@ def retrieve_documents(username: str, folder_name: Optional[str] = None, documen
         else:
             docs = collection.get(include=["documents", "metadatas"])
         
-        if not docs or not docs["documents"]:
+        if not docs or not docs["documents"] or len(docs["documents"]) == 0:
             return None  # No documents found
         
         # Join all documents into a single string
         documents_text = "\n\n".join(docs["documents"])
-        print(f"🔍 Retrieved Documents for {username} via metadata filter: {len(docs['documents'])} chunks")
+        print(f"🔍 Retrieved {len(docs['documents'])} documents for {username} via metadata filter")
         return documents_text
     
     except Exception as e:
@@ -488,6 +508,9 @@ async def chat(
     mode = request.mode
     conversation_id = request.conversation_id or f"{current_user.username}_default"
 
+    print(f"Processing chat query: '{query}' from user: {current_user.username}")
+    print(f"Folder: {folder_name}, Document: {document_name}, Mode: {mode}")
+
     # Retrieve conversation history
     history = conversation_memory.get(conversation_id, [])
 
@@ -514,7 +537,7 @@ async def chat(
     history_text = "\n".join([f"User: {h['query']}\nAI: {h['response']}" for h in history])
     prompt = (
         f"{history_text}\n\n"
-        f"{customer_data}\n\n"
+        f"Document content:\n{customer_data}\n\n"
         f"Act as an immigration consultant and answer the question carefully. Provide different formats of answers based on the question. "
         f"For example, if the question asks for a roadmap, provide a roadmap format answer. "
         f"If the question asks for which program you are eligible or fit for, consider all programs not just one."
@@ -525,10 +548,12 @@ async def chat(
         f"Query: {query}"
     )
 
-    print(f"📩 AI Debug - Constructed Prompt: {prompt}")  # Debugging
+    print(f"Sending prompt to AI model ({len(prompt)} characters)")
 
     # Get AI response
     ai_response = call_ai_model(prompt)
+    
+    print(f"Received AI response ({len(ai_response)} characters)")
 
     # Update conversation history
     history.append({"query": query, "response": ai_response})
