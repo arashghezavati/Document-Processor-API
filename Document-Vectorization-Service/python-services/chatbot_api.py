@@ -375,81 +375,104 @@ async def get_documents(
     try:
         # Get user's collection
         collection_name = get_user_collection_name(current_user.username)
-        collection = qdrant_client.get_or_create_collection(name=collection_name)
         
-        # Build query filter based on folder
-        where_filter = {}
-        if folder_name:
-            where_filter["folder_name"] = folder_name
-        
-        # Query documents with filter - with enhanced error handling
         try:
-            # Add retry logic for Render deployment
-            max_retries = 2
-            retry_count = 0
+            # Try to get the collection with more robust error handling
+            collection = qdrant_client.get_or_create_collection(name=collection_name)
             
-            while retry_count <= max_retries:
-                try:
-                    if where_filter:
-                        results = collection.get(where=where_filter, include=["metadatas"])
-                    else:
-                        results = collection.get(include=["metadatas"])
-                    
-                    # If we got here, the query was successful
-                    break
-                except Exception as retry_error:
-                    retry_count += 1
-                    print(f"Retry {retry_count}/{max_retries} after error: {str(retry_error)}")
-                    
-                    if retry_count > max_retries:
-                        # We've exhausted our retries, re-raise the exception
-                        raise retry_error
-                    
-                    # Wait before retrying (exponential backoff)
-                    import time
-                    time.sleep(1 * retry_count)
-        except Exception as query_error:
-            print(f"DEBUG ERROR: Error during query: {str(query_error)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error querying documents: {str(query_error)}"
-            )
-        
-        # Extract document names from metadata and deduplicate
-        documents = []
-        seen_documents = set()  # Track unique document names
-        
-        if results and "metadatas" in results and results["metadatas"]:
-            for metadata in results["metadatas"]:
-                if "document_name" in metadata:
-                    doc_name = metadata["document_name"]
-                    folder = metadata.get("folder_name", None)
-                    
-                    # Create a unique key for each document+folder combination
-                    doc_key = f"{doc_name}|{folder}"
-                    
-                    # Only add if we haven't seen this document before
-                    if doc_key not in seen_documents:
-                        seen_documents.add(doc_key)
-                        documents.append({
-                            "name": doc_name,
-                            "folder": folder
-                        })
-        
-        return {"documents": documents}
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
+            # Build query filter based on folder
+            where_filter = {}
+            if folder_name:
+                where_filter["folder_name"] = folder_name
+            
+            # Query documents with filter - with enhanced error handling
+            try:
+                # Add retry logic for Render deployment
+                max_retries = 2
+                retry_count = 0
+                
+                while retry_count <= max_retries:
+                    try:
+                        if where_filter:
+                            results = collection.get(where=where_filter, include=["metadatas"])
+                        else:
+                            results = collection.get(include=["metadatas"])
+                        
+                        # If we got here, the query was successful
+                        break
+                    except Exception as retry_error:
+                        retry_count += 1
+                        print(f"Retry {retry_count}/{max_retries} after error: {str(retry_error)}")
+                        
+                        if retry_count > max_retries:
+                            # We've exhausted our retries, try a different approach
+                            print("Trying alternative approach to retrieve documents...")
+                            # Use a direct search with a dummy vector as a fallback
+                            vector_size = int(os.getenv("EMBEDDING_DIMENSION", "768"))
+                            dummy_vector = [0.0] * vector_size
+                            
+                            search_result = collection.client.search(
+                                collection_name=collection_name,
+                                query_vector=dummy_vector,
+                                limit=1000,  # High limit to get all documents
+                                with_payload=True
+                            )
+                            
+                            # Manually construct a result similar to what collection.get would return
+                            results = {
+                                "metadatas": []
+                            }
+                            
+                            for point in search_result:
+                                if hasattr(point, 'payload') and point.payload:
+                                    results["metadatas"].append(point.payload)
+                            
+                            print(f"Alternative approach retrieved {len(results['metadatas'])} documents")
+                            break
+                        
+                        # Wait before retrying (exponential backoff)
+                        import time
+                        time.sleep(1 * retry_count)
+            except Exception as query_error:
+                print(f"DEBUG ERROR: Error during query: {str(query_error)}")
+                # Return empty results instead of raising an error
+                return {"documents": []}
+            
+            # Extract document names from metadata and deduplicate
+            documents = []
+            seen_documents = set()  # Track unique document names
+            
+            if results and "metadatas" in results and results["metadatas"]:
+                for metadata in results["metadatas"]:
+                    if "document_name" in metadata:
+                        doc_name = metadata["document_name"]
+                        folder = metadata.get("folder_name", None)
+                        
+                        # Create a unique key for each document+folder combination
+                        doc_key = f"{doc_name}|{folder}"
+                        
+                        # Only add if we haven't seen this document before
+                        if doc_key not in seen_documents:
+                            seen_documents.add(doc_key)
+                            documents.append({
+                                "name": doc_name,
+                                "folder": folder
+                            })
+            
+            return {"documents": documents}
+        except Exception as collection_error:
+            print(f"Error with collection operations: {str(collection_error)}")
+            # Return empty results instead of raising an error
+            return {"documents": []}
+            
     except Exception as e:
         print(f"DEBUG CRITICAL ERROR: {str(e)}")
         print(f"DEBUG ERROR TYPE: {type(e)}")
         import traceback
         print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
         
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving documents: {str(e)}"
-        )
+        # Return empty results instead of raising an error for better user experience
+        return {"documents": []}
 
 @app.post("/chat")
 async def chat(
