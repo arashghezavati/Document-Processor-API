@@ -4,7 +4,7 @@ services:
     name: document-processor-api
     env: python
     region: oregon  # Choose a region close to your users
-    buildCommand: pip install -r python-services/requirements.txt
+    buildCommand: pip install -r python-services/requirements.txt && pip install "unstructured[docx]" python-docx
     startCommand: cd python-services && python run_server.py
     envVars:
       - key: PYTHON_VERSION

@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from semantic_chunking import chunk_document
 from embedding_function import GeminiEmbeddingFunction
 from unstructured.partition.auto import partition
+import docx
 import asyncio
 import hashlib
 from urllib.parse import urlparse
@@ -208,7 +209,7 @@ async def process_url(url, collection_name="default", metadata=None, follow_link
         
         # Chunk text
         print("🔹 Chunking content...")
-        chunks = chunk_text(content)
+        chunks = chunk_document(content)
         print(f"✅ Created {len(chunks)} chunks")
         
         # Initialize Qdrant
@@ -315,10 +316,72 @@ def extract_text(file_path):
             return extract_text_from_markdown(file_path)
         elif file_extension == '.txt':
             return extract_text_from_txt(file_path)
+        elif file_extension == '.docx':
+            # Special handling for DOCX files with fallback
+            try:
+                # First try with unstructured
+                elements = partition(filename=file_path)
+                return "\n\n".join([str(element) for element in elements])
+            except Exception as docx_error:
+                print(f"Error using unstructured for DOCX: {str(docx_error)}")
+                print("Attempting to use python-docx as fallback...")
+                
+                # Try to import python-docx
+                try:
+                    import docx
+                    doc = docx.Document(file_path)
+                    full_text = []
+                    
+                    # Extract text from paragraphs
+                    for para in doc.paragraphs:
+                        full_text.append(para.text)
+                    
+                    # Extract text from tables
+                    for table in doc.tables:
+                        for row in table.rows:
+                            row_text = []
+                            for cell in row.cells:
+                                row_text.append(cell.text)
+                            full_text.append(" | ".join(row_text))
+                    
+                    return "\n\n".join(full_text)
+                except ImportError:
+                    print("python-docx not available, trying with basic file reading...")
+                    # Last resort - try to read as binary and extract text
+                    try:
+                        with open(file_path, 'rb') as f:
+                            content = f.read()
+                        # Extract any readable text from binary content
+                        text_content = ""
+                        for i in range(0, len(content), 2):
+                            if i + 1 < len(content):
+                                char_code = content[i] + (content[i+1] << 8)
+                                if 32 <= char_code < 127:  # ASCII printable chars
+                                    text_content += chr(char_code)
+                                elif char_code == 13 or char_code == 10:  # CR/LF
+                                    text_content += "\n"
+                        return text_content
+                    except Exception as basic_error:
+                        print(f"Basic text extraction failed: {str(basic_error)}")
+                        return "This DOCX file could not be processed due to missing dependencies. Please install unstructured[docx] or python-docx."
         else:
             # Use unstructured for other file types
-            elements = partition(filename=file_path)
-            return "\n\n".join([str(element) for element in elements])
+            try:
+                elements = partition(filename=file_path)
+                return "\n\n".join([str(element) for element in elements])
+            except Exception as partition_error:
+                print(f"Error with partition for {file_extension}: {str(partition_error)}")
+                # Try to read file as text as fallback
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        return f.read()
+                except:
+                    try:
+                        with open(file_path, 'r', encoding='latin-1') as f:
+                            return f.read()
+                    except Exception as read_error:
+                        print(f"Fallback text reading failed: {str(read_error)}")
+                        return f"This file with extension {file_extension} could not be processed."
     except Exception as e:
         print(f"❌ Error extracting text: {str(e)}")
         return None
