@@ -382,15 +382,38 @@ async def get_documents(
         if folder_name:
             where_filter["folder_name"] = folder_name
         
-        # Query documents with filter
+        # Query documents with filter - with enhanced error handling
         try:
-            if where_filter:
-                results = collection.get(where=where_filter, include=["metadatas"])
-            else:
-                results = collection.get(include=["metadatas"])
+            # Add retry logic for Render deployment
+            max_retries = 2
+            retry_count = 0
+            
+            while retry_count <= max_retries:
+                try:
+                    if where_filter:
+                        results = collection.get(where=where_filter, include=["metadatas"])
+                    else:
+                        results = collection.get(include=["metadatas"])
+                    
+                    # If we got here, the query was successful
+                    break
+                except Exception as retry_error:
+                    retry_count += 1
+                    print(f"Retry {retry_count}/{max_retries} after error: {str(retry_error)}")
+                    
+                    if retry_count > max_retries:
+                        # We've exhausted our retries, re-raise the exception
+                        raise retry_error
+                    
+                    # Wait before retrying (exponential backoff)
+                    import time
+                    time.sleep(1 * retry_count)
         except Exception as query_error:
             print(f"DEBUG ERROR: Error during query: {str(query_error)}")
-            raise query_error
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error querying documents: {str(query_error)}"
+            )
         
         # Extract document names from metadata and deduplicate
         documents = []
@@ -414,11 +437,15 @@ async def get_documents(
                         })
         
         return {"documents": documents}
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         print(f"DEBUG CRITICAL ERROR: {str(e)}")
         print(f"DEBUG ERROR TYPE: {type(e)}")
         import traceback
         print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
+        
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving documents: {str(e)}"
