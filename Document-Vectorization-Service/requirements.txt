@@ -5,6 +5,12 @@ python-dotenv==1.0.1      # Environment variable management
 
 # Document processing
 unstructured>=0.10.0      # Unified document processing (PDF, DOCX, TXT, etc.)
+python-docx>=0.8.11       # For processing .docx files
+unstructured-inference>=0.5.0  # For enhanced document processing
+pdf2image>=1.16.3         # For PDF processing
+pillow>=10.0.0            # Required for image processing
+pytesseract>=0.3.10       # Optional for OCR capabilities
+pdfminer.six>=20221105    # For PDF text extraction
 
 # Web content processing
 requests==2.31.0          # HTTP requests library

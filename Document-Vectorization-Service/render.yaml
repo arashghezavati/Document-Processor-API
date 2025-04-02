@@ -3,25 +3,27 @@ services:
   - type: web
     name: document-processor-api
     env: python
-    region: oregon  # Choose a region close to your users
-    buildCommand: pip install -r python-services/requirements.txt
+    region: oregon # Choose a region close to your users
+    buildCommand: |
+      python python-services/build_setup.py && 
+      pip install -r python-services/requirements.txt
     startCommand: cd python-services && python run_server.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: GOOGLE_GEMINI_API_KEY
-        sync: false  # This will be set manually in the Render dashboard
+        sync: false # This will be set manually in the Render dashboard
       - key: GEMINI_MODEL
         value: gemini-2.0-flash
       - key: EMBEDDING_DIMENSION
         value: 768
       - key: JWT_SECRET_KEY
-        sync: false  # This will be set manually in the Render dashboard
+        sync: false # This will be set manually in the Render dashboard
       - key: QDRANT_URL
-        sync: false  # This will be set manually in the Render dashboard
+        sync: false # This will be set manually in the Render dashboard
       - key: QDRANT_API_KEY
-        sync: false  # This will be set manually in the Render dashboard
+        sync: false # This will be set manually in the Render dashboard
       - key: MONGODB_URI
-        sync: false  # This will be set manually in the Render dashboard
+        sync: false # This will be set manually in the Render dashboard
     healthCheckPath: /health
-    autoDeploy: true  # Enable auto-deployment on git push
+    autoDeploy: true # Enable auto-deployment on git push

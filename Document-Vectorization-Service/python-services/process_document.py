@@ -1,6 +1,7 @@
 import os
 import json
 import xml.etree.ElementTree as ET
+import re
 from dotenv import load_dotenv
 from semantic_chunking import chunk_document
 from embedding_function import GeminiEmbeddingFunction
@@ -64,6 +65,47 @@ def extract_text_from_txt(file_path):
     except Exception as e:
         print(f"Error reading text file: {str(e)}")
         raise
+
+def extract_text_from_docx(file_path):
+    """Extract text from DOCX file with fallback options."""
+    try:
+        # First attempt: Try with unstructured partition
+        try:
+            print("Attempting to extract text with unstructured partition...")
+            from unstructured.partition.docx import partition_docx
+            elements = partition_docx(filename=file_path)
+            text = "\n".join([str(el) for el in elements])
+            print(f"Successfully extracted {len(text)} chars with unstructured")
+            return text
+        except ImportError as e:
+            print(f"Unstructured DOCX partition not available: {str(e)}")
+            
+        # Second attempt: Try with python-docx
+        try:
+            print("Attempting to extract text with python-docx...")
+            import docx
+            doc = docx.Document(file_path)
+            paragraphs = [p.text for p in doc.paragraphs]
+            text = "\n".join(paragraphs)
+            print(f"Successfully extracted {len(text)} chars with python-docx")
+            return text
+        except ImportError:
+            print("python-docx not available, trying basic text extraction")
+        
+        # Final fallback: Try to read the file directly
+        print("Attempting direct binary reading as last resort...")
+        with open(file_path, 'rb') as f:
+            content = f.read()
+            # Extract text using a simple string search
+            extracted_text = ""
+            # Look for text content between XML tags
+            text_chunks = re.findall(b'<w:t[^>]*>(.*?)</w:t>', content)
+            text = " ".join([chunk.decode('utf-8', errors='ignore') for chunk in text_chunks])
+            print(f"Extracted {len(text)} characters with direct binary reading")
+            return text
+    except Exception as e:
+        print(f"Error extracting text from DOCX: {str(e)}")
+        return "Error extracting content from this DOCX file."
 
 def get_database_path():
     """Get the database path."""
@@ -163,6 +205,9 @@ def process_document(file_path, collection_name="default", metadata=None):
             text = extract_text_from_markdown(file_path)
         elif extension == '.txt':
             text = extract_text_from_txt(file_path)
+        elif extension == '.docx':
+            # Use our enhanced docx extractor
+            text = extract_text_from_docx(file_path)
         else:
             try:
                 elements = partition(filename=file_path)
@@ -184,6 +229,14 @@ def process_document(file_path, collection_name="default", metadata=None):
         
         print(f"Extracted text length: {len(text)}")
         print("✅ Text extracted successfully")
+        
+        # Ensure we have proper metadata
+        if metadata is None:
+            metadata = {}
+        
+        # Always include document name in metadata
+        metadata["document_name"] = os.path.basename(file_path)
+        print(f"Using metadata: {metadata}")
         
         # Chunk text using semantic chunking
         print("🔹 Applying semantic chunking...")
@@ -210,6 +263,12 @@ def process_document(file_path, collection_name="default", metadata=None):
         # Generate unique document IDs by using the filename
         file_identifier = os.path.basename(file_path).replace(".", "_")  # Unique filename-based ID
         new_doc_ids = [f"{file_identifier}_doc_{i}" for i in range(len(chunks))]
+        
+        # Before adding, log what we're storing
+        print(f"Adding {len(chunks)} chunks with metadata:")
+        for i in range(min(3, len(chunks))):
+            print(f"  Chunk {i} metadata: {chunk_metadatas[i]}")
+            print(f"  Chunk {i} first 100 chars: {chunks[i][:100]}...")
         
         collection.add(
             documents=chunks,
@@ -250,7 +309,6 @@ async def process_url(url, collection_name="default", metadata=None, follow_link
         
         # Fetch and process web content
         print("🔹 Fetching and extracting content...")
-        from web_content_fetcher import fetch_web_content
         
         # Fetch content with link following if enabled
         content, content_metadata, content_type = fetch_web_content(url, follow_links=follow_links, max_links=max_links)
@@ -372,6 +430,8 @@ def extract_text(file_path):
             return extract_text_from_markdown(file_path)
         elif file_extension == '.txt':
             return extract_text_from_txt(file_path)
+        elif file_extension == '.docx':
+            return extract_text_from_docx(file_path)
         else:
             # Use unstructured for other file types
             elements = partition(filename=file_path)
