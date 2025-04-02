@@ -302,6 +302,24 @@ def retrieve_documents(username: str, folder_name: Optional[str] = None, documen
         print(f"Traceback: {traceback.format_exc()}")
         return None
 
+def call_ai_model(prompt: str):
+    """
+    Sends a query to Google Gemini AI and retrieves a response.
+    """
+    try:
+        # Initialize the correct model
+        model = genai.GenerativeModel(GEMINI_MODEL)
+
+        # Generate AI response
+        response = model.generate_content(prompt)
+
+        # Return AI response text without unnecessary introductions
+        return response.text.strip() if response and response.text else "⚠️ AI did not return a response."
+
+    except Exception as e:
+        print(f"❌ AI Model Error: {str(e)}")
+        return "⚠️ AI service error. Please try again."
+
 # Dynamically import process_document module
 spec = importlib.util.spec_from_file_location("process_document", os.path.join(os.path.dirname(__file__), "process_document.py"))
 process_document = importlib.util.module_from_spec(spec)
