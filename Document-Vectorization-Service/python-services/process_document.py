@@ -2,7 +2,7 @@ import os
 import json
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
-from chunking import chunk_text
+from semantic_chunking import chunk_document
 from embedding_function import GeminiEmbeddingFunction
 from unstructured.partition.auto import partition
 import asyncio
@@ -128,10 +128,17 @@ def process_document(file_path, collection_name="default", metadata=None):
         print(f"Extracted text length: {len(text)}")
         print("✅ Text extracted successfully")
         
-        # Chunk text
-        print("🔹 Chunking text...")
-        chunks = chunk_text(text)
-        print(f"✅ Created {len(chunks)} chunks")
+        # Chunk text using semantic chunking
+        print("🔹 Applying semantic chunking...")
+        document_name = os.path.basename(file_path)
+        chunks, chunk_metadatas = chunk_document(
+            text=text,
+            document_name=document_name,
+            metadata=metadata,
+            chunk_size=4000,  # Larger chunks for better context
+            chunk_overlap=200  # Overlap to maintain context between chunks
+        )
+        print(f"✅ Created {len(chunks)} semantic chunks")
         
         # Initialize Qdrant client
         print("🔹 Creating embeddings and storing in Qdrant...")
@@ -147,21 +154,10 @@ def process_document(file_path, collection_name="default", metadata=None):
         file_identifier = os.path.basename(file_path).replace(".", "_")  # Unique filename-based ID
         new_doc_ids = [f"{file_identifier}_doc_{i}" for i in range(len(chunks))]
         
-        # Prepare metadata for each chunk
-        if metadata is None:
-            metadata = {}
-            
-        # Add document name to metadata if not present
-        if "document_name" not in metadata:
-            metadata["document_name"] = os.path.basename(file_path)
-            
-        # Create metadata list for each chunk
-        metadatas = [metadata.copy() for _ in range(len(chunks))]
-        
         collection.add(
             documents=chunks,
             ids=new_doc_ids,
-            metadatas=metadatas
+            metadatas=chunk_metadatas
         )
         
         print(f"✅ Successfully added {len(new_doc_ids)} new chunks to Qdrant")
