@@ -33,7 +33,18 @@ print("GEMINI_MODEL:", GEMINI_MODEL)
 genai.configure(api_key=GOOGLE_GEMINI_API_KEY)
 
 # Initialize FastAPI app
-app = FastAPI()
+app = FastAPI(
+    title="Document Processor API",
+    description="API for processing and querying documents",
+    version="1.0.0",
+    root_path=""  # Explicitly set empty root path for Render deployment
+)
+
+# Add middleware to handle proxy headers from Render
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+app.add_middleware(
+    TrustedHostMiddleware, allowed_hosts=["*"]
+)
 
 # Configure CORS - Updated to explicitly allow localhost and Render domains
 app.add_middleware(
