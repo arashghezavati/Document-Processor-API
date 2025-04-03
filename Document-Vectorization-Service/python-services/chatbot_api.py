@@ -34,12 +34,23 @@ genai.configure(api_key=GOOGLE_GEMINI_API_KEY)
 
 # Initialize FastAPI app
 app = FastAPI()
+
+# Configure CORS - Updated to explicitly allow localhost and Render domains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (adjust for security)
+    allow_origins=[
+        "http://localhost:3000",  # Local development server
+        "https://localhost:3000", 
+        "http://127.0.0.1:3000",
+        "https://127.0.0.1:3000",
+        "https://document-processor-ui.onrender.com",  # If you deploy frontend to Render
+        "*"  # Allow all origins as fallback
+    ],
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],  # Expose all headers
+    max_age=86400,  # Cache preflight requests for 24 hours
 )
 
 # Initialize Qdrant Client
