@@ -49,20 +49,23 @@ app.add_middleware(
 # Configure CORS - Updated to explicitly allow localhost and Render domains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Local development server
-        "https://localhost:3000", 
-        "http://127.0.0.1:3000",
-        "https://127.0.0.1:3000",
-        "https://document-processor-ui.onrender.com",  # If you deploy frontend to Render
-        "*"  # Allow all origins as fallback
-    ],
+    allow_origins=["*"],  # Allow all origins for now to debug
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
-    expose_headers=["*"],  # Expose all headers
-    max_age=86400,  # Cache preflight requests for 24 hours
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,
 )
+
+# Add CORS headers directly to responses as a fallback
+@app.middleware("http")
+async def add_cors_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
 # Initialize Qdrant Client
 qdrant_client = get_qdrant_client()
@@ -190,6 +193,20 @@ process_document = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(process_document)
 
 # Authentication endpoints
+@app.options("/signin")
+async def signin_options():
+    """
+    Handle preflight OPTIONS requests for the signin endpoint
+    """
+    return {}
+
+@app.options("/signup")
+async def signup_options():
+    """
+    Handle preflight OPTIONS requests for the signup endpoint
+    """
+    return {}
+
 @app.post("/signup", response_model=User)
 async def signup_endpoint(user_data: UserCreate):
     """
@@ -815,7 +832,18 @@ def health_check():
     """
     Health check endpoint for monitoring service status
     """
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.now().isoformat(), "cors_enabled": True}
+
+# Special debug endpoint to test CORS
+@app.get("/cors-test")
+def cors_test():
+    """
+    Special endpoint to test if CORS is working correctly
+    """
+    return {
+        "message": "CORS is working correctly if you can see this message",
+        "timestamp": datetime.now().isoformat()
+    }
 
 # WebSocket endpoint for real-time updates
 @app.websocket("/ws")
